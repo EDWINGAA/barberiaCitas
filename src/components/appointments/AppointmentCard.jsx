@@ -28,6 +28,12 @@ export function AppointmentCard({
   // El cliente ve con quien se corta; barbero y admin ven a quien atienden
   const person = perspective === 'cliente' ? barber : client
 
+  // Salvo hoy, manana y ayer, formatRelativeDay ya devuelve la fecha
+  // completa: el pie de la tarjeta la repetia palabra por palabra.
+  const fechaRelativa = formatRelativeDay(appointment.date)
+  const fechaLarga = formatWeekdayDate(appointment.date)
+  const fechaRepetida = fechaRelativa.toLowerCase() === fechaLarga.toLowerCase()
+
   return (
     <article
       className={cn(
@@ -48,7 +54,7 @@ export function AppointmentCard({
           <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-400">
             <span className="inline-flex items-center gap-1.5">
               <CalendarDays className="h-3.5 w-3.5" />
-              {formatRelativeDay(appointment.date)}
+              {fechaRelativa}
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Clock className="h-3.5 w-3.5" />
@@ -93,8 +99,8 @@ export function AppointmentCard({
         </p>
       )}
 
-      {!compact && (
-        <p className="mt-3 text-[11px] text-ink-600">{formatWeekdayDate(appointment.date)}</p>
+      {!compact && !fechaRepetida && (
+        <p className="mt-3 text-[11px] text-ink-600">{fechaLarga}</p>
       )}
 
       {actions && <div className="mt-4 flex flex-wrap gap-2">{actions}</div>}
@@ -112,7 +118,11 @@ export function AppointmentTimelineRow({ appointment, service, person, actions, 
   return (
     <div
       className={cn(
-        'flex gap-4 rounded-xl border border-ink-700/70 border-l-4 bg-ink-900 p-3 transition',
+        // "flex-wrap" es lo que permite que la fila quepa en un telefono:
+        // sin el, la hora, el nombre y los botones se suman en una sola
+        // linea que no puede encoger, y esa anchura minima arrastraba a
+        // toda la columna del panel fuera de la pantalla.
+        'flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-ink-700/70 border-l-4 bg-ink-900 p-3 transition',
         style?.border,
         onClick && 'cursor-pointer hover:border-ink-600 hover:bg-ink-850'
       )}
@@ -121,17 +131,18 @@ export function AppointmentTimelineRow({ appointment, service, person, actions, 
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
     >
-      <div className="w-16 shrink-0 text-center sm:w-20">
+      <div className="w-14 shrink-0 text-center sm:w-20">
         <p className="text-sm font-semibold text-ink-100">{appointment.startTime}</p>
         <p className="text-[11px] text-ink-500">{appointment.endTime}</p>
       </div>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-28">
         <p className="truncate text-sm font-medium text-ink-100">{person?.name || 'Cliente'}</p>
         <p className="truncate text-xs text-ink-400">{service?.name}</p>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
+      {/* Si no caben en la misma linea, bajan y quedan a la derecha */}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <AppointmentStatusBadge status={appointment.status} size="xs" withDot={false} />
         {actions}
       </div>

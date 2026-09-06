@@ -8,7 +8,6 @@ import {
   GraduationCap,
   Scissors,
   Sparkles,
-  Wallet,
 } from 'lucide-react'
 
 import { PUBLIC_COURSE_STATUS } from '@/constants'
@@ -71,11 +70,23 @@ export default function ClientDashboard() {
   return (
     <div className="space-y-8">
       {/* ---------- Saludo ---------- */}
-      <header>
-        <p className="text-sm text-gold-500">Hola de nuevo,</p>
-        <h1 className="mt-1 font-display text-4xl tracking-wide text-ink-50">
-          {firstName(user.name)}
-        </h1>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-gold-500">Hola de nuevo,</p>
+          <h1 className="mt-1 truncate font-display text-3xl tracking-wide text-ink-50 sm:text-4xl">
+            {firstName(user.name)}
+          </h1>
+        </div>
+
+        {/* Accion principal del cliente: boton dorado relleno para que
+            resalte sobre el resto de enlaces de la pantalla. */}
+        <Button
+          to="/cliente/agendar"
+          icon={CalendarPlus}
+          className="w-full sm:w-auto"
+        >
+          Agendar cita
+        </Button>
       </header>
 
       {/* ---------- Proxima cita ---------- */}
@@ -132,28 +143,26 @@ export default function ClientDashboard() {
           icon={CalendarPlus}
           title="No tienes ninguna cita agendada"
           description="Reserva tu proximo corte y elige el barbero que prefieras."
-          actionLabel="Agendar ahora"
-          to="/cliente/agendar"
+          action={
+            <Button to="/cliente/agendar" icon={CalendarPlus}>
+              Agendar ahora
+            </Button>
+          }
         />
       )}
 
       {/* ---------- Metricas ---------- */}
+      {/* Aqui NO se muestra cuanto lleva gastado el cliente: es un dato
+          que solo le sirve al negocio y que al cliente le sienta mal. */}
       {loading ? (
-        <SkeletonStats />
+        <SkeletonStats count={3} className="sm:grid-cols-2 lg:grid-cols-3" />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <StatCard
             label="Cortes completados"
             value={stats.completedCount}
             icon={Scissors}
             hint="en total con nosotros"
-          />
-          <StatCard
-            label="Invertido en tu imagen"
-            value={formatMoneyShort(stats.totalSpent)}
-            icon={Wallet}
-            accent="emerald"
-            hint="servicios completados"
           />
           <StatCard
             label="Cursos activos"

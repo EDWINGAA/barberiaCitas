@@ -41,7 +41,7 @@ export function Logo({ to = '/', size = 'md', showName = true, className = '' })
             {business.name}
           </span>
           {size !== 'sm' && (
-            <span className="block text-[10px] uppercase tracking-[0.2em] text-gold-500/80">
+            <span className="block truncate text-[10px] uppercase tracking-[0.2em] text-gold-500/80">
               Barberia y escuela
             </span>
           )}
@@ -51,11 +51,11 @@ export function Logo({ to = '/', size = 'md', showName = true, className = '' })
   )
 
   if (!to) {
-    return <div className={cn('flex items-center gap-3', className)}>{content}</div>
+    return <div className={cn('flex min-w-0 items-center gap-3', className)}>{content}</div>
   }
 
   return (
-    <Link to={to} className={cn('flex items-center gap-3 transition hover:opacity-90', className)}>
+    <Link to={to} className={cn('flex min-w-0 items-center gap-3 transition hover:opacity-90', className)}>
       {content}
     </Link>
   )

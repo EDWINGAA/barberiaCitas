@@ -316,6 +316,12 @@ export default function BarberAppointments() {
 /** Franja fija con el dia, el numero de citas y el importe de la jornada */
 function CabeceraDia({ jornada }) {
   const hoy = isToday(jornada.date)
+  const titulo = formatRelativeDay(jornada.date)
+  const fecha = formatWeekdayDate(jornada.date)
+
+  // Fuera de "Hoy", "Manana" y "Ayer", formatRelativeDay ya devuelve la
+  // fecha completa: ponerla otra vez al lado la escribia dos veces.
+  const repetida = titulo.toLowerCase() === fecha.toLowerCase()
 
   return (
     <div
@@ -325,16 +331,16 @@ function CabeceraDia({ jornada }) {
         hoy ? 'border-gold-500/40 bg-gold-500/[0.07]' : 'bg-ink-850/95'
       )}
     >
-      <div className="flex items-baseline gap-3">
+      <div className="flex min-w-0 items-baseline gap-3">
         <h2
           className={cn(
-            'font-display text-xl tracking-wide',
+            'truncate font-display text-xl tracking-wide',
             hoy ? 'text-gold-300' : 'text-ink-100'
           )}
         >
-          {formatRelativeDay(jornada.date)}
+          {titulo}
         </h2>
-        <span className="text-xs text-ink-500">{formatWeekdayDate(jornada.date)}</span>
+        {!repetida && <span className="shrink-0 text-xs text-ink-500">{fecha}</span>}
       </div>
 
       <div className="flex items-center gap-4 text-xs">
@@ -356,9 +362,16 @@ function CabeceraDia({ jornada }) {
 /**
  * Una cita en formato fila.
  *
- * En movil se apila (hora arriba, datos debajo) y en escritorio se
- * reparte en columnas fijas, de modo que todas las horas, nombres y
- * precios quedan alineados entre si.
+ * En movil se lee como una ficha: arriba la hora y el estado, debajo el
+ * cliente y el servicio a todo lo ancho, y al final los botones
+ * repartidos en dos columnas iguales. Cada dato ocupa su propia linea,
+ * asi que nada se aprieta ni se sale de la pantalla.
+ *
+ * A partir de "lg" todo se coloca en una sola linea con columnas fijas,
+ * de modo que las horas, los nombres y los precios quedan alineados
+ * entre todas las filas. La posicion de cada celda se declara con
+ * col-start/row-start para poder cambiar el orden entre movil y
+ * escritorio sin duplicar el contenido.
  */
 function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }) {
   const estilo = APPOINTMENT_STATUS_STYLES[cita.status]
@@ -368,7 +381,7 @@ function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }
     <article
       className={cn(
         'grid gap-x-4 gap-y-3 border-l-4 px-4 py-4 transition-colors sm:px-5',
-        'grid-cols-[4.25rem_minmax(0,1fr)]',
+        'grid-cols-[auto_minmax(0,1fr)]',
         'lg:grid-cols-[5rem_minmax(0,1.15fr)_minmax(0,1fr)_7.5rem_minmax(0,auto)] lg:items-center',
         estilo?.border,
         !primera && 'border-t border-t-ink-800',
@@ -376,16 +389,21 @@ function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }
       )}
     >
       {/* --- Hora --- */}
-      <div className="row-span-2 lg:row-span-1">
+      <div className="lg:col-start-1 lg:row-start-1">
         <p className="font-display text-2xl leading-none tracking-wide text-ink-100">
           {cita.startTime}
         </p>
         <p className="mt-1 text-[11px] text-ink-500">a {cita.endTime}</p>
       </div>
 
+      {/* --- Estado: en movil acompana a la hora, arriba a la derecha --- */}
+      <div className="justify-self-end self-center lg:col-start-4 lg:row-start-1 lg:justify-self-start">
+        <AppointmentStatusBadge status={cita.status} />
+      </div>
+
       {/* --- Cliente --- */}
-      <div className="flex min-w-0 items-center gap-3">
-        <Avatar src={cliente?.photoURL} name={cliente?.name} size="sm" className="hidden sm:flex" />
+      <div className="col-span-2 flex min-w-0 items-center gap-3 lg:col-span-1 lg:col-start-2 lg:row-start-1">
+        <Avatar src={cliente?.photoURL} name={cliente?.name} size="sm" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ink-100">
             {cliente?.name || 'Cliente'}
@@ -395,7 +413,7 @@ function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }
               href={`tel:${cliente.phone}`}
               className="mt-0.5 inline-flex items-center gap-1.5 text-xs text-ink-500 transition hover:text-gold-400"
             >
-              <Phone className="h-3 w-3" />
+              <Phone className="h-3 w-3 shrink-0" />
               {cliente.phone}
             </a>
           )}
@@ -403,7 +421,7 @@ function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }
       </div>
 
       {/* --- Servicio --- */}
-      <div className="col-start-2 min-w-0 lg:col-start-auto">
+      <div className="col-span-2 min-w-0 lg:col-span-1 lg:col-start-3 lg:row-start-1">
         <p className="flex items-center gap-2 text-sm text-ink-200">
           <Scissors className="h-3.5 w-3.5 shrink-0 text-gold-500/70" />
           <span className="truncate">{servicio?.name || 'Servicio'}</span>
@@ -413,19 +431,14 @@ function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }
         </p>
       </div>
 
-      {/* --- Estado --- */}
-      <div className="col-start-2 lg:col-start-auto">
-        <AppointmentStatusBadge status={cita.status} />
-      </div>
-
       {/* --- Acciones --- */}
-      <div className="col-start-2 flex flex-wrap items-center gap-2 lg:col-start-auto lg:justify-end">
+      <div className="col-span-2 lg:col-span-1 lg:col-start-5 lg:row-start-1">
         <AccionesEstado cita={cita} ocupada={ocupada} onCambiar={onCambiarEstado} />
       </div>
 
       {/* --- Nota del cliente, ocupa toda la fila --- */}
       {cita.notes && (
-        <p className="col-start-2 flex gap-2 rounded-lg bg-ink-850/70 px-3 py-2 text-xs leading-relaxed text-ink-400 lg:col-span-4 lg:col-start-2">
+        <p className="col-span-2 flex gap-2 rounded-lg bg-ink-850/70 px-3 py-2 text-xs leading-relaxed text-ink-400 lg:col-span-4 lg:col-start-2 lg:row-start-2">
           <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-600" />
           {cita.notes}
         </p>
@@ -438,16 +451,21 @@ function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }
 /*  Botones de cambio de estado segun el estado actual                 */
 /* ------------------------------------------------------------------ */
 
+/**
+ * En movil los botones van en dos columnas iguales y a todo lo ancho:
+ * son mas faciles de acertar con el dedo y ninguno se corta. A partir de
+ * "sm" vuelven a su tamano natural, alineados a la derecha en escritorio.
+ */
 function AccionesEstado({ cita, ocupada, onCambiar }) {
   const pasada = cita.date <= todayISO()
 
   // Una cita cerrada ya no admite cambios
   if ([APPOINTMENT_STATUS.CANCELADA, APPOINTMENT_STATUS.COMPLETADA].includes(cita.status)) {
-    return <span className="text-xs text-ink-600">Cerrada</span>
+    return <p className="text-xs text-ink-600 lg:text-right">Cerrada</p>
   }
 
   return (
-    <>
+    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center lg:justify-end">
       {cita.status === APPOINTMENT_STATUS.PENDIENTE && (
         <Button
           size="xs"
@@ -491,6 +509,6 @@ function AccionesEstado({ cita, ocupada, onCambiar }) {
       >
         Cancelar
       </Button>
-    </>
+    </div>
   )
 }

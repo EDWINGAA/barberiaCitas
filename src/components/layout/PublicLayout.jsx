@@ -51,7 +51,9 @@ export function PublicLayout({ children }) {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
+          {/* shrink-0: en pantallas muy estrechas quien cede espacio es
+              el logotipo, no los botones de sesion */}
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             {isAuthenticated ? (
               <>
                 <Button to={ROLE_HOME[user.role]} variant="outline" size="sm" className="hidden sm:inline-flex">

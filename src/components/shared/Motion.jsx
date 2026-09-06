@@ -8,11 +8,19 @@ import { useMediaQuery } from '@/hooks/useMediaQuery'
 /*  Aparicion al hacer scroll                                          */
 /* ================================================================== */
 
+/**
+ * Desplazamiento inicial de cada direccion.
+ *
+ * Las dos horizontales solo se aplican a partir de "sm": en un telefono
+ * un desplazamiento lateral de 3rem deja el bloque fuera de la pantalla
+ * mientras no ha entrado en escena, y la pagina se puede arrastrar de
+ * lado. En movil entran desde abajo, que no ensancha nada.
+ */
 const DIRECTIONS = {
   up: 'translate-y-10',
   down: '-translate-y-10',
-  left: 'translate-x-12',
-  right: '-translate-x-12',
+  left: 'translate-y-10 sm:translate-y-0 sm:translate-x-12',
+  right: 'translate-y-10 sm:translate-y-0 sm:-translate-x-12',
   none: '',
 }
 

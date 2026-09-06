@@ -68,15 +68,26 @@ export function SkeletonList({ rows = 4, className = '' }) {
   )
 }
 
-/** Esqueleto de tarjeta de metrica */
-export function SkeletonStats({ count = 4 }) {
+/**
+ * Esqueleto de tarjeta de metrica.
+ * "className" permite pasar otra rejilla cuando la pantalla no muestra
+ * cuatro tarjetas, para que el esqueleto no salte al cargar.
+ */
+export function SkeletonStats({ count = 4, className = 'sm:grid-cols-2 xl:grid-cols-4' }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className={cn('grid gap-4', className)}>
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="rounded-2xl border border-ink-700/70 bg-ink-900 p-5">
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="mt-4 h-8 w-20" />
-          <Skeleton className="mt-3 h-3 w-32" />
+        // Imita la forma de StatCard: en una linea en movil, apilada en sm
+        <div
+          key={i}
+          className="flex items-center gap-3 rounded-2xl border border-ink-700/70 bg-ink-900 p-4 sm:block sm:p-5"
+        >
+          <Skeleton className="h-9 w-9 shrink-0 rounded-lg sm:hidden" />
+          <div className="min-w-0 flex-1">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="mt-2 h-3 w-32 sm:mt-3 sm:w-28" />
+          </div>
+          <Skeleton className="h-7 w-16 shrink-0 sm:mt-3 sm:h-8 sm:w-20" />
         </div>
       ))}
     </div>

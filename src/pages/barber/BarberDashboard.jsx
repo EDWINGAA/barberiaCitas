@@ -126,7 +126,7 @@ export default function BarberDashboard() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ---------- Agenda de hoy ---------- */}
-        <section className="lg:col-span-2">
+        <section className="min-w-0 lg:col-span-2">
           <Card>
             <CardHeader
               title="Tu dia de hoy"
@@ -178,7 +178,7 @@ export default function BarberDashboard() {
         </section>
 
         {/* ---------- Cursos ---------- */}
-        <section className="space-y-6">
+        <section className="min-w-0 space-y-6">
           <Card>
             <CardHeader
               title="Proximas clases"

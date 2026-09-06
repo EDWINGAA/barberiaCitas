@@ -70,6 +70,20 @@ service cloud.firestore {
       return request.resource.data;
     }
 
+    /*
+     * True si la cita indicada pertenece a quien hace la peticion.
+     *
+     * Lo usa la coleccion "busy", cuyos documentos llevan el mismo id
+     * que su cita: asi el cliente puede reservar su hueco y liberarlo al
+     * cancelar, sin poder tocar los de nadie mas.
+     */
+    function esMiCita(citaId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/appointments/$(citaId))
+        && get(/databases/$(database)/documents/appointments/$(citaId)).data.clientId
+             == request.auth.uid;
+    }
+
     // Documento tal y como esta guardado ahora
     function stored() {
       return resource.data;
@@ -227,6 +241,37 @@ service cloud.firestore {
     //  Bloqueos de agenda. Lectura abierta a usuarios autenticados
     //  porque el calculo de horarios disponibles los necesita.
     //  Escritura: solo el barbero dueno del bloqueo, o el admin.
+
+    /* ============================================================= */
+    /*  busy: espejo publico de horas ocupadas                       */
+    /* ============================================================= */
+    //  Guarda, por cada cita que ocupa la silla, SOLO el barbero, la
+    //  fecha y las horas de inicio y fin. Ni quien viene, ni que
+    //  servicio, ni el precio, ni las notas.
+    //
+    //  Existe porque el cliente necesita saber que huecos quedan libres
+    //  y no puede leer las citas de los demas. Y en Firestore las reglas
+    //  no filtran: una consulta "citas del barbero X el dia Y" no puede
+    //  demostrar que todo lo devuelto seria del propio cliente, asi que
+    //  se rechaza entera. Con esta coleccion la consulta si es segura,
+    //  porque no hay nada privado que proteger.
+    //
+    //  El id del documento es el MISMO que el de su cita, lo que permite
+    //  comprobar de quien es sin guardar el clientId aqui.
+
+    match /busy/{citaId} {
+      // Cualquiera con cuenta puede consultarla: es lo que hace falta
+      // para calcular la disponibilidad
+      allow read: if isSignedIn();
+
+      allow create, update: if isAdmin()
+        || (isBarber() && incoming().barberId == request.auth.uid)
+        || esMiCita(citaId);
+
+      allow delete: if isAdmin()
+        || (isBarber() && stored().barberId == request.auth.uid)
+        || esMiCita(citaId);
+    }
 
     match /blocks/{blockId} {
       allow read: if isSignedIn();

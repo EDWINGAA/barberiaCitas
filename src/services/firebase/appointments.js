@@ -14,6 +14,7 @@ import {
   getDoc,
   getDocs,
   query,
+  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore'
@@ -48,6 +49,83 @@ async function barberAppointmentsOn(barberId, date) {
   return snapshotToArray(snapshot)
 }
 
+/* ------------------------------------------------------------------ */
+/*  Espejo publico de ocupacion                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Por que existe la coleccion "busy".
+ *
+ * Para saber que huecos quedan libres hay que conocer las horas que ya
+ * tiene ocupadas el barbero. Pero un cliente NO puede leer las citas de
+ * los demas: las reglas solo le dejan ver las suyas.
+ *
+ * Y en Firestore las reglas no filtran, autorizan: una consulta del
+ * tipo "citas del barbero X el dia Y" no puede demostrar que todos los
+ * resultados serian del propio cliente, asi que se rechaza entera,
+ * incluso cuando no hay ninguna cita.
+ *
+ * La solucion es este espejo: por cada cita que ocupa la silla se
+ * guarda un documento con el MISMO id que la cita y solo cuatro campos
+ * -barbero, fecha, hora de inicio y hora de fin-. Ni quien viene, ni
+ * que servicio, ni cuanto paga, ni las notas. Con eso basta para
+ * calcular huecos, y las citas de verdad siguen siendo privadas.
+ */
+
+/** Referencia al documento de ocupacion de una cita */
+function ocupacionRef(citaId) {
+  return doc(firestore(), COLLECTIONS.BUSY, citaId)
+}
+
+/**
+ * Deja la ocupacion en linea con la cita.
+ *
+ * Si la cita ocupa la silla se escribe (o se actualiza) su documento; si
+ * esta cancelada, marcada como no asistio o ya no existe, se borra para
+ * liberar el hueco.
+ */
+async function sincronizarOcupacion(citaId, cita) {
+  const ocupa = cita && BLOCKING_APPOINTMENT_STATUS.includes(cita.status)
+
+  if (ocupa) {
+    await setDoc(ocupacionRef(citaId), {
+      barberId: cita.barberId,
+      date: cita.date,
+      startTime: cita.startTime,
+      endTime: cita.endTime,
+    })
+    return
+  }
+
+  try {
+    await deleteDoc(ocupacionRef(citaId))
+  } catch {
+    // Puede no existir todavia: no es un fallo
+  }
+}
+
+/**
+ * Horas ocupadas de un barbero en una fecha, con la forma que espera el
+ * motor de disponibilidad. El estado es siempre uno que bloquea, porque
+ * las citas que no bloquean ni siquiera tienen documento aqui.
+ */
+async function barberBusyOn(barberId, date) {
+  const snapshot = await getDocs(
+    query(
+      collection(firestore(), COLLECTIONS.BUSY),
+      where('barberId', '==', barberId),
+      where('date', '==', date)
+    )
+  )
+  return snapshotToArray(snapshot).map((o) => ({
+    id: o.id,
+    date: o.date,
+    startTime: o.startTime,
+    endTime: o.endTime,
+    status: APPOINTMENT_STATUS.CONFIRMADA,
+  }))
+}
+
 /** Bloqueos de un barbero en una fecha concreta */
 async function barberBlocksOn(barberId, date) {
   const snapshot = await getDocs(
@@ -68,8 +146,27 @@ async function barberCourses(barberId) {
   return snapshotToArray(snapshot)
 }
 
-/** Carga en paralelo todo lo necesario para evaluar un dia */
+/**
+ * Todo lo necesario para calcular huecos libres.
+ *
+ * Lee el espejo de ocupacion, no las citas: asi tambien funciona para un
+ * cliente, que no tiene permiso para leer las citas de los demas.
+ */
 async function loadDayContext(barberId, date) {
+  const [appointments, blocks, courses, business] = await Promise.all([
+    barberBusyOn(barberId, date),
+    barberBlocksOn(barberId, date),
+    barberCourses(barberId),
+    firebaseCatalog.business.get(),
+  ])
+  return { appointments, blocks, courses, business }
+}
+
+/**
+ * Lo mismo, pero con las citas completas. Solo lo usa la agenda del
+ * barbero y del administrador, que si tienen permiso para verlas.
+ */
+async function loadAgendaContext(barberId, date) {
   const [appointments, blocks, courses, business] = await Promise.all([
     barberAppointmentsOn(barberId, date),
     barberBlocksOn(barberId, date),
@@ -178,7 +275,7 @@ async function getAvailableSlots(params) {
 
 async function getAgendaDay({ barberId, date }) {
   return run(async () => {
-    const { appointments, blocks, courses, business } = await loadDayContext(barberId, date)
+    const { appointments, blocks, courses, business } = await loadAgendaContext(barberId, date)
     const busy = buildBusyIntervals({ date, appointments, blocks, courses })
 
     return {
@@ -237,6 +334,10 @@ async function create({ clientId, barberId, serviceId, date, startTime, notes = 
 
     const { id: _id, ...payload } = model
     const created = await addDoc(collection(firestore(), COLLECTIONS.APPOINTMENTS), payload)
+
+    // La cita ya existe: ahora se refleja en el espejo de ocupacion
+    await sincronizarOcupacion(created.id, model)
+
     return { ...model, id: created.id }
   }, 'appointments/create-failed')
 }
@@ -250,7 +351,13 @@ async function setStatus(id, status) {
       status,
       updatedAt: nowISO(),
     })
-    return get(id)
+
+    // Cancelar o marcar "no asistio" libera el hueco; volver a un estado
+    // activo lo vuelve a ocupar.
+    const actualizada = await get(id)
+    await sincronizarOcupacion(id, actualizada)
+
+    return actualizada
   }, 'appointments/status-failed')
 }
 
@@ -315,7 +422,12 @@ async function reschedule(id, { date, startTime, barberId }) {
       status: APPOINTMENT_STATUS.PENDIENTE,
       updatedAt: nowISO(),
     })
-    return get(id)
+
+    // Cambia de dia, de hora o hasta de barbero: la ocupacion se rehace
+    const movida = await get(id)
+    await sincronizarOcupacion(id, movida)
+
+    return movida
   }, 'appointments/reschedule-failed')
 }
 
@@ -327,12 +439,20 @@ async function updateAppointment(id, data) {
       updatedAt: nowISO(),
     })
     await updateDoc(doc(firestore(), COLLECTIONS.APPOINTMENTS, id), changes)
-    return get(id)
+
+    const actualizada = await get(id)
+    // "changes" puede traer un estado nuevo, asi que se revisa siempre
+    await sincronizarOcupacion(id, actualizada)
+
+    return actualizada
   }, 'appointments/update-failed')
 }
 
 async function removeAppointment(id) {
   return run(async () => {
+    // Primero la ocupacion: las reglas comprueban de quien es la cita, y
+    // para eso la cita todavia tiene que existir.
+    await sincronizarOcupacion(id, null)
     await deleteDoc(doc(firestore(), COLLECTIONS.APPOINTMENTS, id))
     return true
   }, 'appointments/remove-failed')

@@ -19,6 +19,7 @@ import {
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 import { GALLERY_LOCATION_LABELS, GALLERY_LOCATION_MAX } from '@/constants'
+import { comprimirParaDocumento } from '@/utils/image'
 import { BUSINESS_DOC_ID, COLLECTIONS, firebaseStorage, firestore } from '@/config/firebase'
 import {
   createBusinessModel,
@@ -266,11 +267,29 @@ async function uploadImage(path, file) {
     fail('storage/too-large', 'La imagen no puede superar los 8 MB.')
   }
 
-  return run(async () => {
+  /*
+   * Se intenta Cloud Storage y, si no esta disponible, se guarda la
+   * imagen comprimida dentro del propio documento.
+   *
+   * El motivo es practico: Cloud Storage exige el plan de pago (Blaze)
+   * con tarjeta, y una barberia con unas decenas de fotos no lo
+   * necesita. Comprimida a 900 px una foto ronda los 150 KB, muy por
+   * debajo del limite de 1 MB por documento de Firestore.
+   *
+   * La ventaja de intentarlo primero es que el dia que se active Blaze
+   * esto empieza a usar Storage solo, sin tocar una linea.
+   */
+  try {
     const storageRef = ref(firebaseStorage(), path)
     await uploadBytes(storageRef, file, { contentType: file.type })
-    return getDownloadURL(storageRef)
-  }, 'storage/upload-failed')
+    return await getDownloadURL(storageRef)
+  } catch (error) {
+    console.warn(
+      '[storage] Cloud Storage no disponible, se guarda la imagen comprimida en Firestore.',
+      error?.code || error?.message || error
+    )
+    return run(() => comprimirParaDocumento(file), 'storage/upload-failed')
+  }
 }
 
 async function removeFile(path) {

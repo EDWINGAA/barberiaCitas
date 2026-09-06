@@ -10,6 +10,7 @@
 
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
@@ -26,6 +27,19 @@ import { fail, run, translateAuthError } from './helpers'
 
 /** Perfil en memoria del usuario actual, para lecturas sincronas */
 let currentProfile = null
+
+/**
+ * Verdadero mientras un registro esta a medias.
+ *
+ * createUserWithEmailAndPassword firma al usuario nuevo de inmediato, asi
+ * que el observador de abajo se dispara ANTES de que signUp haya podido
+ * escribir su ficha en Firestore. Sin esta bandera, el observador veia
+ * una cuenta sin ficha, la tomaba por rota y cerraba la sesion: la
+ * escritura salia despues sin identificar y las reglas la rechazaban con
+ * "Missing or insufficient permissions", dejando la cuenta huerfana en
+ * Authentication.
+ */
+let registroEnCurso = false
 
 /** Lee el documento de perfil de un uid */
 async function fetchProfile(uid) {
@@ -51,8 +65,13 @@ function onAuthChanged(callback) {
     }
 
     try {
+      // Durante el registro la ficha aun no existe. No es una cuenta
+      // rota: es que signUp todavia no ha terminado. Se deja en paz; el
+      // propio signUp avisara cuando el alta este completa.
+      if (registroEnCurso) return
+
       const profile = await fetchProfile(fbUser.uid)
-      if (cancelled) return
+      if (cancelled || registroEnCurso) return
 
       // Cuenta sin perfil o desactivada: se cierra la sesion
       if (!profile || profile.active === false) {
@@ -112,9 +131,13 @@ async function signIn(email, password) {
  * las cuentas de barbero solo las da de alta el administrador.
  */
 async function signUp({ name, email, password, phone }) {
+  let creado = null
+  registroEnCurso = true
+
   try {
     const clean = String(email).trim().toLowerCase()
     const credential = await createUserWithEmailAndPassword(firebaseAuth(), clean, password)
+    creado = credential.user
     const { uid } = credential.user
 
     // Nombre visible en Authentication, util en la consola de Firebase
@@ -135,8 +158,31 @@ async function signUp({ name, email, password, phone }) {
     currentProfile = profile
     return profile
   } catch (error) {
+    /*
+     * Si la cuenta llego a crearse en Authentication pero su ficha no,
+     * se deshace el alta. Una cuenta sin ficha no sirve para nada y
+     * ademas deja el correo pillado: al reintentar, el usuario recibia
+     * "ese correo ya esta en uso" y se quedaba sin poder entrar.
+     */
+    if (creado) {
+      try {
+        await deleteUser(creado)
+      } catch {
+        // Si tampoco se puede borrar, al menos no dejamos sesion abierta
+        try {
+          await fbSignOut(firebaseAuth())
+        } catch {
+          /* nada mas que hacer */
+        }
+      }
+    }
+
     if (error?.name === 'ServiceError') throw error
     throw translateAuthError(error)
+  } finally {
+    // Se levanta al final, pase lo que pase: si quedara puesta, una
+    // cuenta rota de verdad ya no cerraria sesion nunca.
+    registroEnCurso = false
   }
 }
 

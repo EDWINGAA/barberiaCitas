@@ -4,6 +4,7 @@
  */
 
 import { GALLERY_LOCATION_LABELS, GALLERY_LOCATION_MAX } from '@/constants'
+import { comprimirParaDocumento } from '@/utils/image'
 import {
   createServiceModel,
   createBusinessModel,
@@ -227,33 +228,6 @@ async function updateBusiness(data) {
 /* ================================================================== */
 
 /**
- * Comprime una imagen en el navegador antes de guardarla como data URL.
- * Es indispensable en modo demo: localStorage tiene un limite de unos
- * 5 MB y una foto sin procesar lo agotaria enseguida.
- */
-function compressImage(file, maxSize = 900, quality = 0.75) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'))
-    reader.onload = () => {
-      const img = new Image()
-      img.onerror = () => reject(new Error('El archivo no es una imagen valida.'))
-      img.onload = () => {
-        const scale = Math.min(1, maxSize / Math.max(img.width, img.height))
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.round(img.width * scale)
-        canvas.height = Math.round(img.height * scale)
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        resolve(canvas.toDataURL('image/jpeg', quality))
-      }
-      img.src = reader.result
-    }
-    reader.readAsDataURL(file)
-  })
-}
-
-/**
  * "Sube" un archivo. En modo demo devuelve una data URL comprimida que
  * se guarda igual que una URL de Firebase Storage.
  *
@@ -269,7 +243,7 @@ async function uploadImage(path, file) {
     fail('storage/too-large', 'La imagen no puede superar los 8 MB.')
   }
   await delay(500)
-  return compressImage(file)
+  return comprimirParaDocumento(file)
 }
 
 /**

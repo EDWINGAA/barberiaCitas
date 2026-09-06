@@ -287,7 +287,31 @@ del visitante pide reducir animaciones, el avance automático se desactiva.
 2. Elige **Modo de producción** (las reglas de este repositorio ya lo cubren).
 3. Selecciona la región más cercana, por ejemplo `us-central1` o `southamerica-east1`.
 
-**Storage**
+> Ojo con no confundirse de producto: si la pantalla de reglas que ves tiene
+> esta forma, estás en **Realtime Database**, que esta aplicación **no usa**.
+>
+> ```json
+> { "rules": { ".read": false, ".write": false } }
+> ```
+>
+> Las de Firestore empiezan por `rules_version = '2'`.
+
+**Storage (opcional)**
+
+Cloud Storage ya **no está en el plan gratuito**: exige el plan Blaze con
+tarjeta. No hace falta activarlo.
+
+Si no lo activas, al subir una foto la aplicación la **comprime en el navegador**
+(900 px, ~150 KB) y la guarda dentro del propio documento de Firestore. Se sube
+igual desde el móvil o el ordenador y el plan gratuito Spark sobra.
+
+Si algún día activas Blaze, `uploadImage` intenta Cloud Storage **primero** y
+solo recurre a la compresión cuando no está disponible, así que empezará a
+usarlo sin tocar una línea de código. Ver
+[`src/services/firebase/catalog.js`](src/services/firebase/catalog.js) y
+[`src/utils/image.js`](src/utils/image.js).
+
+Para activarlo, si te interesa:
 1. Menú lateral → **Compilación → Storage → Comenzar**.
 2. Acepta la configuración por defecto y elige la misma región.
 
@@ -315,6 +339,26 @@ VITE_FIREBASE_MEASUREMENT_ID=G-XXXXXXX
 > Vite solo lee el `.env` al arrancar: **reinicia `npm run dev`** después de
 > editarlo.
 
+**Alternativa sin tocar el `.env`.** El repositorio incluye `.env.firebase`, que
+solo cambia el interruptor. Así puedes dejar `VITE_USE_MOCK=true` como valor por
+defecto y arrancar contra Firebase cuando quieras:
+
+```bash
+npm run dev            # modo demo (mock)
+npm run dev:firebase   # contra el Firebase real
+
+npm run build          # compilado en modo demo
+npm run build:firebase # compilado contra el Firebase real
+```
+
+Las credenciales siguen viviendo solo en `.env`, que git ignora.
+
+> **No uses `npm run dev -- --mode firebase`.** En Windows npm se queda con
+> `--mode` como opción suya y le pasa a Vite solo `firebase`, que Vite
+> interpreta como la carpeta raíz a servir. El resultado es un 404 y el aviso
+> `Could not auto-determine entry point`. Para eso existen los scripts
+> `dev:firebase` y `build:firebase`.
+
 ### 6. Publicar las reglas de seguridad
 
 Las reglas están en `firestore.rules` y `storage.rules`. Puedes subirlas de dos
@@ -327,12 +371,27 @@ formas.
    **Publicar**.
 
 **Opción B — Firebase CLI (recomendada)**
+
+El repositorio ya trae `firebase.json`, `.firebaserc` y `firestore.indexes.json`,
+así que no hace falta `firebase init`:
+
 ```bash
 npm install -g firebase-tools
 firebase login
-firebase init firestore storage   # apunta a firestore.rules y storage.rules
+firebase deploy --only firestore:rules
+```
+
+Si **no** has activado Storage (ver arriba), despliega solo las reglas de
+Firestore como en el ejemplo: un `firebase deploy` a secas intentaría subir
+también las de Storage y fallaría. Con Storage activado:
+
+```bash
 firebase deploy --only firestore:rules,storage
 ```
+
+> Índices: todas las consultas de la aplicación usan solo filtros de igualdad y
+> ninguna ordena por otro campo, así que Firestore las resuelve con sus índices
+> automáticos. Por eso `firestore.indexes.json` está vacío.
 
 ### 7. Crear el primer administrador
 

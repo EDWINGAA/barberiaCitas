@@ -93,6 +93,8 @@ export const COLLECTIONS = {
   SERVICES: 'services',
   BARBER_SERVICES: 'barberServices',
   APPOINTMENTS: 'appointments',
+  // Espejo publico de las horas ocupadas, sin datos personales
+  BUSY: 'busy',
   BLOCKS: 'blocks',
   COURSES: 'courses',
   ENROLLMENTS: 'enrollments',

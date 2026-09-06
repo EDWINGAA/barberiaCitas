@@ -6,7 +6,9 @@
   "description": "Gestion de citas y cursos para barberia - Vite + React + Tailwind + Firebase",
   "scripts": {
     "dev": "vite",
+    "dev:firebase": "vite --mode firebase",
     "build": "vite build",
+    "build:firebase": "vite build --mode firebase",
     "preview": "vite preview"
   },
   "dependencies": {

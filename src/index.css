@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Estilos base globales - tema oscuro con acentos dorados
+   ============================================================ */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-ink-950 text-ink-200 font-sans antialiased;
+  }
+
+  /* Scrollbar discreta */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-ink-950;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ink-700 rounded-full border-2 border-ink-950;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-600;
+  }
+
+  /* Anillo de foco accesible en toda la app */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-gold-500/70 ring-offset-2 ring-offset-ink-950;
+  }
+
+  /* Normaliza los selectores de fecha/hora nativos al tema oscuro */
+  input[type='date']::-webkit-calendar-picker-indicator,
+  input[type='time']::-webkit-calendar-picker-indicator {
+    filter: invert(0.8) sepia(1) saturate(3) hue-rotate(3deg);
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  /* Texto con degradado dorado, usado en titulos destacados */
+  .text-gradient-gold {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(120deg, #f6efcf 0%, #d4b443 45%, #a9841e 100%);
+  }
+
+  /* Superficie estandar de tarjeta */
+  .surface {
+    @apply bg-ink-900 border border-ink-700/70 rounded-2xl;
+  }
+
+  /* Patron sutil de fondo para secciones hero */
+  .bg-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgba(201, 162, 39, 0.14) 1px, transparent 0);
+    background-size: 32px 32px;
+  }
+}
+
+@layer utilities {
+  /* Oculta la barra de scroll pero mantiene el desplazamiento */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

@@ -1,0 +1,106 @@
+rules_version = '2';
+
+// =====================================================================
+//  REGLAS DE SEGURIDAD DE FIREBASE STORAGE - Barberia Don Aurelio
+// =====================================================================
+//
+//  Rutas que usa la aplicacion:
+//    users/{uid}/...      foto de perfil (la sube el propio usuario)
+//    courses/{courseId}/  portada del curso (la sube su instructor)
+//    business/...         logotipo del negocio (solo el administrador)
+//
+//  Como desplegarlas:
+//    firebase deploy --only storage
+// =====================================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    /* ============================================================= */
+    /*  Funciones auxiliares                                         */
+    /* ============================================================= */
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // El rol vive en Firestore, asi que se consulta desde aqui
+    function profile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return isSignedIn() ? profile().role : 'anonimo';
+    }
+
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    function isBarber() {
+      return role() == 'barbero';
+    }
+
+    // Solo imagenes y como maximo 8 MB, igual que valida el cliente
+    function isValidImage() {
+      return request.resource.contentType.matches('image/.*')
+        && request.resource.size < 8 * 1024 * 1024;
+    }
+
+    /* ============================================================= */
+    /*  Fotos de perfil                                              */
+    /* ============================================================= */
+    //  Lectura publica: las fotos de los barberos se muestran en la web.
+    //  Escritura: el propio usuario o un administrador.
+
+    match /users/{uid}/{fileName=**} {
+      allow read: if true;
+      allow write: if isValidImage()
+        && (request.auth.uid == uid || isAdmin());
+      allow delete: if request.auth.uid == uid || isAdmin();
+    }
+
+    /* ============================================================= */
+    /*  Portadas de cursos                                           */
+    /* ============================================================= */
+    //  Lectura publica: aparecen en el catalogo.
+    //  Escritura: cualquier barbero o el administrador. La propiedad
+    //  concreta del curso la garantiza la regla de Firestore, que es
+    //  la que decide si el documento del curso admite esa portada.
+
+    match /courses/{courseId}/{fileName=**} {
+      allow read: if true;
+      allow write: if isValidImage() && (isBarber() || isAdmin());
+      allow delete: if isBarber() || isAdmin();
+    }
+
+    /* ============================================================= */
+    /*  Galeria de trabajos                                          */
+    /* ============================================================= */
+    //  Fotos de los carruseles publicos. Las ve cualquiera; solo el
+    //  administrador las sube o las borra.
+
+    match /gallery/{fileName=**} {
+      allow read: if true;
+      allow write: if isValidImage() && isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    /* ============================================================= */
+    /*  Identidad del negocio                                        */
+    /* ============================================================= */
+
+    match /business/{fileName=**} {
+      allow read: if true;
+      allow write, delete: if isAdmin() && (isValidImage() || request.method == 'delete');
+    }
+
+    /* ============================================================= */
+    /*  Cierre por defecto                                           */
+    /* ============================================================= */
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

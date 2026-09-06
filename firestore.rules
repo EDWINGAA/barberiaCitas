@@ -1,0 +1,332 @@
+rules_version = '2';
+
+// =====================================================================
+//  REGLAS DE SEGURIDAD DE FIRESTORE - Barberia Don Aurelio
+// =====================================================================
+//
+//  Modelo de roles (campo "role" del documento users/{uid}):
+//    cliente  - rol por defecto del registro publico
+//    barbero  - creado unicamente por un administrador
+//    admin    - acceso total
+//
+//  Principios que aplican estas reglas:
+//    1. Nadie puede darse a si mismo el rol de barbero o admin.
+//    2. Un barbero solo edita SUS PROPIOS cursos.
+//    3. Un cliente solo gestiona SUS PROPIAS citas e inscripciones.
+//    4. El catalogo publico (servicios, barberos, cursos publicados y
+//       datos del negocio) se puede leer sin iniciar sesion.
+//
+//  Como desplegarlas:
+//    firebase deploy --only firestore:rules
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* ============================================================= */
+    /*  Funciones auxiliares                                         */
+    /* ============================================================= */
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Lee el documento de perfil del usuario autenticado
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasProfile() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function role() {
+      return hasProfile() ? profile().role : 'anonimo';
+    }
+
+    function isActive() {
+      return hasProfile() && profile().active == true;
+    }
+
+    function isAdmin() {
+      return isActive() && role() == 'admin';
+    }
+
+    function isBarber() {
+      return isActive() && role() == 'barbero';
+    }
+
+    function isClient() {
+      return isActive() && role() == 'cliente';
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Campos que llegan en la escritura
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Documento tal y como esta guardado ahora
+    function stored() {
+      return resource.data;
+    }
+
+    // true si la escritura NO toca ninguno de los campos indicados
+    function keepsFields(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(fields.toSet());
+    }
+
+    /* ============================================================= */
+    /*  users                                                        */
+    /* ============================================================= */
+    //  - Lectura: cualquiera autenticado (hace falta para resolver
+    //    nombres de barbero y cliente en citas y cursos). El perfil de
+    //    barbero ademas es publico, lo consume la landing.
+    //  - Alta: solo el propio usuario, y SIEMPRE con rol "cliente".
+    //    Las cuentas de barbero y admin las crea un administrador.
+    //  - Edicion: el dueno (sin tocar role ni active) o un admin.
+    //  - Borrado: nadie. Se desactiva con active=false.
+
+    match /users/{uid} {
+      allow read: if isSignedIn()
+        || resource.data.role == 'barbero'; // perfiles publicos del equipo
+
+      // Registro publico: el usuario crea su propio documento y solo
+      // puede hacerlo con rol cliente. Esta es la regla que impide que
+      // alguien se autoconceda el rol de barbero o de administrador.
+      allow create: if isSelf(uid)
+        && incoming().role == 'cliente'
+        && incoming().active == true;
+
+      // Alta hecha por un administrador (barberos u otros admins)
+      allow create: if isAdmin()
+        && incoming().role in ['cliente', 'barbero', 'admin'];
+
+      // El dueno actualiza su perfil pero NUNCA su rol ni su estado
+      allow update: if isSelf(uid)
+        && keepsFields(['role', 'active', 'email', 'createdAt']);
+
+      // El administrador puede cambiar rol y activar/desactivar
+      allow update: if isAdmin();
+
+      allow delete: if false; // borrado logico con active=false
+    }
+
+    /* ============================================================= */
+    /*  services                                                     */
+    /* ============================================================= */
+    //  Catalogo publico de lectura; solo el admin lo modifica.
+
+    match /services/{serviceId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    /* ============================================================= */
+    /*  barberServices                                               */
+    /* ============================================================= */
+    //  Lo que ofrece cada barbero y a que precio.
+    //
+    //  - Lectura publica: el cliente necesita ver los precios antes de
+    //    reservar, incluso sin cuenta.
+    //  - Un barbero solo toca SUS propias filas, y nunca puede
+    //    reasignarlas a otro companero.
+    //  - El administrador puede corregir cualquiera.
+
+    match /barberServices/{rowId} {
+      allow read: if true;
+
+      allow create: if isAdmin()
+        || (isBarber() && incoming().barberId == request.auth.uid);
+
+      allow update: if isBarber()
+        && stored().barberId == request.auth.uid
+        && incoming().barberId == stored().barberId
+        // El servicio del catalogo al que apunta la fila no se cambia
+        && incoming().serviceId == stored().serviceId;
+
+      allow update, delete: if isAdmin();
+
+      allow delete: if isBarber() && stored().barberId == request.auth.uid;
+    }
+
+    /* ============================================================= */
+    /*  gallery                                                      */
+    /* ============================================================= */
+    //  Fotos de los carruseles del sitio publico.
+    //  Lectura abierta (las ve cualquier visitante, sin cuenta);
+    //  escritura reservada al administrador, que es quien decide que
+    //  trabajos se ensenan y en que orden.
+
+    match /gallery/{photoId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    /* ============================================================= */
+    /*  business                                                     */
+    /* ============================================================= */
+    //  Datos del negocio y horarios: lectura publica (los necesita la
+    //  web y el calculo de disponibilidad), escritura solo del admin.
+
+    match /business/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    /* ============================================================= */
+    /*  appointments                                                 */
+    /* ============================================================= */
+    //  - El cliente ve y crea SUS citas, y puede cancelarlas o
+    //    reagendarlas mientras sigan abiertas.
+    //  - El barbero ve las suyas y cambia su estado.
+    //  - El admin lo puede todo.
+    //
+    //  Nota: Firestore no filtra por documento en las consultas de
+    //  coleccion, asi que las vistas siempre consultan con where()
+    //  sobre clientId o barberId; estas reglas garantizan que una
+    //  consulta sin ese filtro sea rechazada.
+
+    match /appointments/{appointmentId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.clientId == request.auth.uid)
+        || (isBarber() && resource.data.barberId == request.auth.uid);
+
+      // El cliente agenda para si mismo y siempre en estado pendiente
+      allow create: if isClient()
+        && incoming().clientId == request.auth.uid
+        && incoming().status == 'pendiente';
+
+      // El barbero o el admin pueden crear citas manualmente
+      allow create: if isAdmin()
+        || (isBarber() && incoming().barberId == request.auth.uid);
+
+      // El cliente solo cambia fecha, hora, notas y cancelacion
+      allow update: if isSignedIn()
+        && stored().clientId == request.auth.uid
+        && keepsFields(['clientId', 'barberId', 'serviceId', 'price', 'createdAt'])
+        && incoming().status in ['pendiente', 'confirmada', 'cancelada'];
+
+      // El barbero gestiona el estado de sus propias citas
+      allow update: if isBarber()
+        && stored().barberId == request.auth.uid
+        && keepsFields(['clientId', 'serviceId', 'price', 'createdAt']);
+
+      allow update, delete: if isAdmin();
+      allow delete: if false; // el resto no borra, cancela
+    }
+
+    /* ============================================================= */
+    /*  blocks                                                       */
+    /* ============================================================= */
+    //  Bloqueos de agenda. Lectura abierta a usuarios autenticados
+    //  porque el calculo de horarios disponibles los necesita.
+    //  Escritura: solo el barbero dueno del bloqueo, o el admin.
+
+    match /blocks/{blockId} {
+      allow read: if isSignedIn();
+
+      allow create: if isAdmin()
+        || (isBarber() && incoming().barberId == request.auth.uid);
+
+      allow update, delete: if isAdmin()
+        || (isBarber() && stored().barberId == request.auth.uid);
+    }
+
+    /* ============================================================= */
+    /*  courses                                                      */
+    /* ============================================================= */
+    //  - Lectura publica: el catalogo debe verse sin cuenta.
+    //  - Crear: un barbero, siempre asignandose a si mismo como
+    //    instructor. Un admin puede crear para cualquiera.
+    //  - Editar: SOLO el instructor propietario, o el admin.
+    //    El instructor nunca puede cambiar de dueno el curso.
+    //  - enrolledCount lo mueven las inscripciones, no el formulario.
+
+    match /courses/{courseId} {
+      allow read: if true;
+
+      allow create: if isAdmin()
+        || (isBarber() && incoming().instructorId == request.auth.uid);
+
+      // El barbero edita su propio curso sin poder reasignarlo
+      allow update: if isBarber()
+        && stored().instructorId == request.auth.uid
+        && incoming().instructorId == stored().instructorId;
+
+      allow update: if isAdmin();
+
+      // Un cliente inscribiendose solo puede tocar el contador de cupo
+      allow update: if isClient()
+        && keepsFields([
+          'title', 'description', 'syllabus', 'requirements', 'coverURL',
+          'instructorId', 'level', 'modality', 'price', 'capacity',
+          'startDate', 'endDate', 'schedule', 'location', 'status', 'createdAt'
+        ])
+        && incoming().enrolledCount <= stored().capacity
+        && incoming().enrolledCount >= 0;
+
+      allow delete: if isAdmin()
+        || (isBarber()
+            && stored().instructorId == request.auth.uid
+            && stored().enrolledCount == 0);
+    }
+
+    /* ============================================================= */
+    /*  enrollments                                                  */
+    /* ============================================================= */
+    //  - El cliente ve y gestiona SOLO sus inscripciones.
+    //  - El instructor del curso ve las de sus cursos y pasa lista.
+    //  - El admin lo ve todo.
+
+    function courseOf(courseId) {
+      return get(/databases/$(database)/documents/courses/$(courseId)).data;
+    }
+
+    function isCourseInstructor(courseId) {
+      return isBarber() && courseOf(courseId).instructorId == request.auth.uid;
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.clientId == request.auth.uid)
+        || isCourseInstructor(resource.data.courseId);
+
+      // El cliente se inscribe a si mismo, siempre en estado "inscrito"
+      allow create: if isClient()
+        && incoming().clientId == request.auth.uid
+        && incoming().status == 'inscrito'
+        && courseOf(incoming().courseId).status in ['publicado', 'en curso']
+        && courseOf(incoming().courseId).enrolledCount < courseOf(incoming().courseId).capacity;
+
+      allow create: if isAdmin();
+
+      // El cliente solo puede cancelar su propia inscripcion
+      allow update: if isSignedIn()
+        && stored().clientId == request.auth.uid
+        && keepsFields(['courseId', 'clientId', 'attendance', 'enrolledAt'])
+        && incoming().status == 'cancelado';
+
+      // El instructor pasa lista y confirma pagos de sus cursos
+      allow update: if isCourseInstructor(stored().courseId)
+        && keepsFields(['courseId', 'clientId', 'enrolledAt']);
+
+      allow update, delete: if isAdmin();
+      allow delete: if false;
+    }
+
+    /* ============================================================= */
+    /*  Cierre por defecto                                           */
+    /* ============================================================= */
+    //  Cualquier coleccion no contemplada queda cerrada.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

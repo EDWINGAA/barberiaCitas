@@ -3,8 +3,10 @@
  *
  * Chat privado entre el cliente y el barbero de una cita. El hilo vive
  * pegado a la cita: solo sus dos participantes pueden leerlo o escribir,
- * y solo mientras la cita esta confirmada (una vez completada queda de
- * solo lectura).
+ * y solo mientras la cita esta confirmada.
+ *
+ * La conversacion MUERE CON LA CITA: al completarla, cancelarla o marcar
+ * que no asistio se borra entera, igual que en el modo Firebase.
  */
 
 import { CHAT_WRITABLE_STATUS, MESSAGE_MAX_LENGTH, ROLES } from '@/constants'
@@ -149,6 +151,32 @@ async function listConversations({ userId, role }) {
   return [...byAppt.values()].sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)))
 }
 
-export const mockMessages = { listThread, send, markRead, unreadCounts, listConversations }
+/**
+ * Borra la conversacion entera de una cita.
+ *
+ * La llama sola la capa de citas cuando la cita termina. Devuelve
+ * cuantos mensajes se borraron.
+ */
+async function purgeThread({ appointmentId }) {
+  await delay(80)
+  if (!appointmentId) return 0
+
+  const db = getDB()
+  const antes = (db.messages || []).length
+  db.messages = (db.messages || []).filter((m) => m.appointmentId !== appointmentId)
+  const borrados = antes - db.messages.length
+
+  if (borrados) saveDB(db)
+  return borrados
+}
+
+export const mockMessages = {
+  listThread,
+  send,
+  markRead,
+  unreadCounts,
+  listConversations,
+  purgeThread,
+}
 
 export default mockMessages

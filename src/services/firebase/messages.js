@@ -6,10 +6,14 @@
  *
  * Cada mensaje lleva copiados "appointmentId", "clientId" y "barberId".
  * En Firestore las reglas NO filtran: una consulta solo pasa si esta
- * acotada por el mismo campo que comprueba la regla. Por eso aqui SIEMPRE
- * se consulta por el lado del usuario (clientId o barberId) y el hilo
- * concreto se recorta en memoria. Asi no hacen falta indices compuestos
- * ni un espejo de datos como el de "busy".
+ * acotada por el mismo campo que comprueba la regla. Por eso todas las
+ * consultas llevan el lado del usuario (clientId o barberId), y las que
+ * ademas miran un hilo concreto anaden el appointmentId en la propia
+ * consulta en lugar de filtrar en memoria.
+ *
+ * La conversacion MUERE CON LA CITA: al completarla, cancelarla o marcar
+ * que no asistio se borra entera. Eso mantiene la coleccion pequena, que
+ * es lo que de verdad abarata cada lectura.
  */
 
 import { addDoc, collection, doc, getDoc, getDocs, query, where, writeBatch } from 'firebase/firestore'
@@ -45,13 +49,49 @@ function readField(role) {
   return role === ROLES.BARBERO ? 'readByBarber' : 'readByClient'
 }
 
+/** Referencia a la coleccion, para no repetirla en cada consulta */
+function coleccion() {
+  return collection(firestore(), COLLECTIONS.MESSAGES)
+}
+
 /**
- * Todos los mensajes del usuario (consulta acotada por su lado, unica
- * forma de que las reglas la dejen pasar).
+ * Todos los mensajes del usuario.
+ *
+ * La consulta va acotada por su lado (clientId o barberId) porque es la
+ * unica forma de que las reglas la dejen pasar: en Firestore una
+ * consulta solo se acepta si esta limitada por el mismo campo que
+ * comprueba la regla.
+ *
+ * Solo la usan las pantallas que necesitan ver TODAS las conversaciones
+ * a la vez. Como los hilos se borran al terminar la cita, aqui nunca hay
+ * mas que las citas confirmadas en curso.
  */
 function messagesOf(userId, role) {
+  return getDocs(query(coleccion(), where(ownerField(role), '==', userId)))
+}
+
+/**
+ * Mensajes de UNA cita concreta.
+ *
+ * Lleva las dos condiciones a la vez: el lado del usuario (para que las
+ * reglas la acepten) y la cita (para no descargar de mas). Antes se
+ * pedian todos los mensajes del usuario y se filtraba en memoria, lo que
+ * con el refresco automatico del chat abierto multiplicaba el coste por
+ * cada mensaje acumulado.
+ *
+ * El administrador no es participante de ninguna cita, asi que consulta
+ * por la cita a secas: su regla no mira los campos del documento.
+ */
+function threadOf(appointmentId, userId, role) {
+  if (role === ROLES.ADMIN) {
+    return getDocs(query(coleccion(), where('appointmentId', '==', appointmentId)))
+  }
   return getDocs(
-    query(collection(firestore(), COLLECTIONS.MESSAGES), where(ownerField(role), '==', userId))
+    query(
+      coleccion(),
+      where(ownerField(role), '==', userId),
+      where('appointmentId', '==', appointmentId)
+    )
   )
 }
 
@@ -61,10 +101,10 @@ function messagesOf(userId, role) {
 
 async function listThread({ appointmentId, userId, role }) {
   return run(async () => {
-    const snap = await messagesOf(userId, role)
-    return snapshotToArray(snap)
-      .filter((m) => m.appointmentId === appointmentId)
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    const snap = await threadOf(appointmentId, userId, role)
+    return snapshotToArray(snap).sort((a, b) =>
+      String(a.createdAt).localeCompare(String(b.createdAt))
+    )
   }, 'messages/list-failed')
 }
 
@@ -160,10 +200,8 @@ async function markRead({ appointmentId, userId, role }) {
     const side = role === ROLES.BARBERO ? ROLES.BARBERO : ROLES.CLIENTE
     const field = readField(side)
 
-    const snap = await messagesOf(userId, side)
-    const pendientes = snap.docs.filter(
-      (d) => d.data().appointmentId === appointmentId && d.data()[field] === false
-    )
+    const snap = await threadOf(appointmentId, userId, side)
+    const pendientes = snap.docs.filter((d) => d.data()[field] === false)
     if (!pendientes.length) return 0
 
     const batch = writeBatch(firestore())
@@ -173,6 +211,45 @@ async function markRead({ appointmentId, userId, role }) {
   }, 'messages/read-failed')
 }
 
-export const firebaseMessages = { listThread, send, markRead, unreadCounts, listConversations }
+/**
+ * Borra la conversacion entera de una cita.
+ *
+ * Se llama sola cuando la cita termina (completada, cancelada o no
+ * asistio): el chat sirve para esa sesion y despues no tiene por que
+ * seguir ocupando sitio ni encareciendo cada consulta.
+ *
+ * Devuelve cuantos mensajes se borraron.
+ */
+async function purgeThread({ appointmentId, userId, role }) {
+  return run(async () => {
+    if (!appointmentId) return 0
+
+    const snap = await threadOf(appointmentId, userId, role)
+    if (snap.empty) return 0
+
+    /*
+     * writeBatch admite 500 operaciones. Un hilo de una cita nunca se
+     * acerca a eso, pero se trocea igual para que nunca falle un borrado
+     * por una conversacion inusualmente larga.
+     */
+    const docs = snap.docs
+    for (let i = 0; i < docs.length; i += 450) {
+      const lote = writeBatch(firestore())
+      docs.slice(i, i + 450).forEach((d) => lote.delete(d.ref))
+      // eslint-disable-next-line no-await-in-loop -- los lotes van en orden
+      await lote.commit()
+    }
+    return docs.length
+  }, 'messages/purge-failed')
+}
+
+export const firebaseMessages = {
+  listThread,
+  send,
+  markRead,
+  unreadCounts,
+  listConversations,
+  purgeThread,
+}
 
 export default firebaseMessages

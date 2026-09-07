@@ -29,7 +29,6 @@ const NotFound = lazy(() => import('@/pages/public/NotFound'))
 const ClientDashboard = lazy(() => import('@/pages/client/ClientDashboard'))
 const BookAppointment = lazy(() => import('@/pages/client/BookAppointment'))
 const MyAppointments = lazy(() => import('@/pages/client/MyAppointments'))
-const ClientMessages = lazy(() => import('@/pages/client/ClientMessages'))
 const MyCourses = lazy(() => import('@/pages/client/MyCourses'))
 
 // Barbero
@@ -54,8 +53,10 @@ const AdminCourses = lazy(() => import('@/pages/admin/AdminCourses'))
 const AdminGallery = lazy(() => import('@/pages/admin/AdminGallery'))
 const AdminBusiness = lazy(() => import('@/pages/admin/AdminBusiness'))
 
-// Compartida entre los tres roles
+// Compartidas entre roles
 const Profile = lazy(() => import('@/pages/Profile'))
+// Cliente y barbero: la bandeja es simetrica, cambia solo el lado
+const Messages = lazy(() => import('@/pages/Messages'))
 
 /* ------------------------------------------------------------------ */
 /*  Utilidad: volver arriba al cambiar de ruta                         */
@@ -106,7 +107,7 @@ export default function App() {
                 <Route index element={<ClientDashboard />} />
                 <Route path="agendar" element={<BookAppointment />} />
                 <Route path="citas" element={<MyAppointments />} />
-                <Route path="mensajes" element={<ClientMessages />} />
+                <Route path="mensajes" element={<Messages />} />
                 <Route path="cursos" element={<MyCourses />} />
                 <Route path="perfil" element={<Profile />} />
               </Route>
@@ -118,6 +119,7 @@ export default function App() {
                 <Route index element={<BarberDashboard />} />
                 <Route path="agenda" element={<BarberAgenda />} />
                 <Route path="citas" element={<BarberAppointments />} />
+                <Route path="mensajes" element={<Messages />} />
                 <Route path="bloqueos" element={<BarberBlocks />} />
                 <Route path="servicios" element={<BarberServices />} />
                 <Route path="cursos" element={<BarberCourses />} />

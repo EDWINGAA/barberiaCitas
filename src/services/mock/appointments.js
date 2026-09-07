@@ -9,6 +9,7 @@
 import {
   APPOINTMENT_STATUS,
   BLOCKING_APPOINTMENT_STATUS,
+  CHAT_CLOSING_STATUS,
   MIN_HOURS_BEFORE_CANCEL,
   ROLES,
 } from '@/constants'
@@ -16,6 +17,8 @@ import { createAppointmentModel, createBlockModel, nowISO } from '@/models'
 import { addMinutes, hoursUntil, timeToMinutes, todayISO } from '@/utils/date'
 import { buildBusyIntervals, computeSlots, findConflict, getOpeningForDate } from '@/utils/schedule'
 import { resolveOffering } from '@/services/offeringsCore'
+import { checkCanBook } from '@/services/bookingPolicy'
+import mockMessages from './messages'
 import { clone, delay, fail, findById, getDB, insert, readCollection, saveDB, update } from './store'
 
 /* ------------------------------------------------------------------ */
@@ -189,6 +192,18 @@ async function create({ clientId, barberId, serviceId, date, startTime, notes = 
 
   if (date < todayISO()) fail('appointments/past-date', 'No puedes agendar en una fecha pasada.')
 
+  /*
+   * Limites contra el abuso: una cita activa a la vez, y tope de
+   * cancelaciones e inasistencias recientes. Se salta cuando la cita la
+   * crea el barbero o el administrador a mano, porque entonces hay
+   * alguien de la casa decidiendo.
+   */
+  if (!status) {
+    const suyas = db.appointments.filter((a) => a.clientId === clientId)
+    const veto = checkCanBook({ appointments: suyas, today: todayISO() })
+    if (veto) fail(veto.code, veto.message)
+  }
+
   const endTime = addMinutes(startTime, offering.duration)
   assertSlotFree({ barberId, date, startTime, endTime })
 
@@ -209,6 +224,16 @@ async function create({ clientId, barberId, serviceId, date, startTime, notes = 
 }
 
 /** Cambia el estado de una cita */
+/**
+ * Borra la conversacion de una cita cuando esta llega a su fin.
+ * Mismo comportamiento que en modo Firebase: el chat sirve para esa
+ * sesion y no se queda acumulando mensajes viejos.
+ */
+async function cerrarConversacion(cita) {
+  if (!cita || !CHAT_CLOSING_STATUS.includes(cita.status)) return
+  await mockMessages.purgeThread({ appointmentId: cita.id })
+}
+
 async function setStatus(id, status) {
   await delay()
   if (!Object.values(APPOINTMENT_STATUS).includes(status)) {
@@ -216,6 +241,7 @@ async function setStatus(id, status) {
   }
   const result = update('appointments', id, { status, updatedAt: nowISO() })
   if (!result) fail('appointments/not-found', 'La cita no existe.')
+  await cerrarConversacion(result)
   return result
 }
 
@@ -299,6 +325,7 @@ async function updateAppointment(id, data) {
   changes.updatedAt = nowISO()
   const result = update('appointments', id, changes)
   if (!result) fail('appointments/not-found', 'La cita no existe.')
+  await cerrarConversacion(result)
   return result
 }
 
@@ -310,6 +337,8 @@ async function removeAppointment(id) {
   if (index === -1) fail('appointments/not-found', 'La cita no existe.')
   db.appointments.splice(index, 1)
   saveDB()
+  // Al desaparecer la cita, su conversacion tampoco tiene sentido
+  await mockMessages.purgeThread({ appointmentId: id })
   return true
 }
 

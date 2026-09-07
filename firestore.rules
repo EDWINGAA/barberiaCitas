@@ -84,6 +84,21 @@ service cloud.firestore {
              == request.auth.uid;
     }
 
+    /** Datos de una cita, para comprobar contra ella */
+    function citaDe(citaId) {
+      return get(/databases/$(database)/documents/appointments/$(citaId)).data;
+    }
+
+    /**
+     * True si la cita ya no ocupa sitio: o no existe, o esta cancelada,
+     * completada o marcada como no asistio. Es la condicion para poder
+     * soltar su ocupacion y su cerradura.
+     */
+    function citaYaNoOcupa(citaId) {
+      return !exists(/databases/$(database)/documents/appointments/$(citaId))
+        || !(citaDe(citaId).status in ['pendiente', 'confirmada']);
+    }
+
     // Documento tal y como esta guardado ahora
     function stored() {
       return resource.data;
@@ -211,20 +226,48 @@ service cloud.firestore {
         || (isSignedIn() && resource.data.clientId == request.auth.uid)
         || (isBarber() && resource.data.barberId == request.auth.uid);
 
-      // El cliente agenda para si mismo y siempre en estado pendiente
+      /*
+       * El cliente agenda para si mismo, siempre pendiente, y SOLO si su
+       * cerradura ya apunta a esta cita.
+       *
+       * Esa condicion es la que impone "una cita activa a la vez" aqui
+       * dentro, donde no se puede contar: la cerradura es un documento
+       * por cliente que no se deja crear dos veces.
+       *
+       * Lo demas evita que se agende gratis, que se invente un barbero o
+       * que meta una nota enorme para inflar la base de datos.
+       */
       allow create: if isClient()
         && incoming().clientId == request.auth.uid
-        && incoming().status == 'pendiente';
+        && incoming().status == 'pendiente'
+        && exists(/databases/$(database)/documents/activeBooking/$(request.auth.uid))
+        && get(/databases/$(database)/documents/activeBooking/$(request.auth.uid))
+             .data.appointmentId == appointmentId
+        && incoming().price is number
+        && incoming().price >= 0
+        && incoming().notes is string
+        && incoming().notes.size() <= 300
+        && incoming().date is string
+        && incoming().startTime is string
+        && exists(/databases/$(database)/documents/users/$(incoming().barberId))
+        && get(/databases/$(database)/documents/users/$(incoming().barberId)).data.role == 'barbero';
 
       // El barbero o el admin pueden crear citas manualmente
       allow create: if isAdmin()
         || (isBarber() && incoming().barberId == request.auth.uid);
 
-      // El cliente solo cambia fecha, hora, notas y cancelacion
-      allow update: if isSignedIn()
+      /*
+       * El cliente cambia fecha, hora, notas y puede cancelar. Lo que NO
+       * puede es confirmarse a si mismo: quien confirma es el barbero.
+       * Antes 'confirmada' estaba en esta lista, y con eso un cliente se
+       * saltaba su aprobacion y hasta se abria el chat.
+       */
+      allow update: if isClient()
         && stored().clientId == request.auth.uid
         && keepsFields(['clientId', 'barberId', 'serviceId', 'price', 'createdAt'])
-        && incoming().status in ['pendiente', 'confirmada', 'cancelada'];
+        && incoming().status in ['pendiente', 'cancelada']
+        && incoming().notes is string
+        && incoming().notes.size() <= 300;
 
       // El barbero gestiona el estado de sus propias citas
       allow update: if isBarber()
@@ -264,13 +307,59 @@ service cloud.firestore {
       // para calcular la disponibilidad
       allow read: if isSignedIn();
 
+      /*
+       * Escribir aqui solo vale para copiar la cita, nunca para inventar
+       * ocupacion. Sin esta comprobacion un cliente podia escribir en el
+       * documento de SU cita el barbero, el dia y la hora que quisiera, y
+       * dejar la agenda de cualquier barbero bloqueada un dia entero.
+       */
       allow create, update: if isAdmin()
-        || (isBarber() && incoming().barberId == request.auth.uid)
-        || esMiCita(citaId);
+        || (
+          (esMiCita(citaId) || (isBarber() && incoming().barberId == request.auth.uid))
+          && incoming().barberId == citaDe(citaId).barberId
+          && incoming().date == citaDe(citaId).date
+          && incoming().startTime == citaDe(citaId).startTime
+          && incoming().endTime == citaDe(citaId).endTime
+        );
 
+      /*
+       * Y solo se puede liberar cuando la cita ya no ocupa sitio. Si no,
+       * un cliente podia borrar su ocupacion dejando la cita en pie: el
+       * hueco volvia a ofrecerse y dos personas acababan citadas a la
+       * misma hora.
+       */
       allow delete: if isAdmin()
         || (isBarber() && stored().barberId == request.auth.uid)
-        || esMiCita(citaId);
+        || (esMiCita(citaId) && citaYaNoOcupa(citaId))
+        || (isSignedIn() && !exists(/databases/$(database)/documents/appointments/$(citaId)));
+    }
+
+    /* ============================================================= */
+    /*  activeBooking: una cita activa por cliente                   */
+    /* ============================================================= */
+    //  Un documento por cliente, con el id de la cita que tiene en pie.
+    //
+    //  Existe porque las reglas no saben contar. Lo que si saben es
+    //  mirar si un documento existe, y un cliente no puede crear dos
+    //  veces el mismo: mientras su cerradura siga puesta, no puede
+    //  agendar otra cita.
+    //
+    //  Se suelta sola cuando la cita termina.
+
+    match /activeBooking/{clientId} {
+      allow read: if isSelf(clientId) || isBarber() || isAdmin();
+
+      // Crear si: el cliente para si mismo, o la casa al dar una cita
+      allow create: if isSelf(clientId) || isBarber() || isAdmin();
+
+      // Repuntarla a otra cita solo la casa. Si el cliente pudiera,
+      // reescribiria la suya y el limite no serviria de nada.
+      allow update: if isBarber() || isAdmin();
+
+      // El cliente solo la suelta cuando su cita ya termino
+      allow delete: if isAdmin()
+        || isBarber()
+        || (isSelf(clientId) && citaYaNoOcupa(stored().appointmentId));
     }
 
     match /blocks/{blockId} {
@@ -297,10 +386,6 @@ service cloud.firestore {
     //    leyendo la cita: es una operacion de un solo documento).
     //  - "readByClient" / "readByBarber" son las marcas de leido: cada
     //    lado solo puede mover la suya y nada mas.
-
-    function citaDe(appointmentId) {
-      return get(/databases/$(database)/documents/appointments/$(appointmentId)).data;
-    }
 
     function esParteDelMensaje(datos) {
       return isSignedIn()
@@ -342,7 +427,16 @@ service cloud.firestore {
             && incoming().readByClient == stored().readByClient)
         );
 
-      allow delete: if isAdmin();
+      // La conversacion muere con la cita: al completarla, cancelarla o
+      // marcar que no asistio, quien la cierra borra el hilo entero. Por
+      // eso pueden borrar sus propios mensajes las dos partes, no solo
+      // el administrador.
+      //
+      // No se comprueba aqui el estado de la cita a proposito: eso
+      // obligaria a leer la cita una vez POR MENSAJE, y el borrado va en
+      // lote. La conversacion es efimera por diseno, asi que dejar que
+      // sus dos participantes la borren no descubre nada a nadie.
+      allow delete: if isAdmin() || esParteDelMensaje(resource.data);
     }
 
     /* ============================================================= */

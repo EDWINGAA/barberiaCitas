@@ -297,14 +297,52 @@ export const MIN_HOURS_BEFORE_CANCEL = 2
 export const MESSAGE_MAX_LENGTH = 1000
 
 /**
- * El chat de una cita se abre cuando el barbero la confirma. Una vez
- * completada el hilo sigue visible pero de solo lectura; en el resto de
- * estados (pendiente, cancelada, no-show) no hay chat.
+ * El chat vive pegado a la cita y MUERE CON ELLA.
+ *
+ * Se abre cuando el barbero confirma la cita y desaparece en cuanto esta
+ * llega a su fin: al completarla, cancelarla o marcar que no asistio, la
+ * conversacion se borra entera de la base de datos.
+ *
+ * Es a proposito, por dos razones:
+ *
+ *   1. El chat sirve para esa sesion ("llego cinco minutos tarde"), no
+ *      para guardar un historial que nadie va a releer.
+ *   2. Cada mensaje guardado se cobra cada vez que se lee. Sin borrarlos
+ *      se acumularian miles de mensajes viejos que encarecen cada
+ *      consulta sin aportar nada.
  */
 export const CHAT_WRITABLE_STATUS = [APPOINTMENT_STATUS.CONFIRMADA]
-export const CHAT_VISIBLE_STATUS = [
-  APPOINTMENT_STATUS.CONFIRMADA,
+export const CHAT_VISIBLE_STATUS = [APPOINTMENT_STATUS.CONFIRMADA]
+
+/* ------------------------------------------------------------------ */
+/*  Limites contra el abuso                                            */
+/* ------------------------------------------------------------------ */
+/*
+ * Una barberia pierde dinero cuando alguien le llena la agenda de citas
+ * que no piensa cumplir: esas horas quedan bloqueadas para clientes de
+ * verdad. Estos limites existen para eso, no para incordiar a nadie que
+ * use la aplicacion con normalidad.
+ */
+
+/** Citas activas (pendiente o confirmada) que puede tener un cliente */
+export const MAX_ACTIVE_APPOINTMENTS = 1
+
+/** Cancelaciones seguidas que hacen sospechar, y en cuantos dias */
+export const MAX_RECENT_CANCELLATIONS = 4
+export const CANCELLATION_WINDOW_DAYS = 7
+
+/** Inasistencias que bloquean nuevas reservas, y en cuantos dias */
+export const MAX_RECENT_NO_SHOWS = 3
+export const NO_SHOW_WINDOW_DAYS = 60
+
+/** Longitud maxima de la nota que el cliente deja en su cita */
+export const APPOINTMENT_NOTES_MAX_LENGTH = 300
+
+/** Estados en los que la cita termina y su conversacion se borra */
+export const CHAT_CLOSING_STATUS = [
   APPOINTMENT_STATUS.COMPLETADA,
+  APPOINTMENT_STATUS.CANCELADA,
+  APPOINTMENT_STATUS.NO_SHOW,
 ]
 
 /** Cada cuantos milisegundos el chat abierto vuelve a pedir mensajes */

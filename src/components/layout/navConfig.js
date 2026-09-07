@@ -31,6 +31,7 @@ export const BARBER_NAV = [
       { to: '/barbero', label: 'Resumen', icon: LayoutDashboard, end: true },
       { to: '/barbero/agenda', label: 'Mi agenda', icon: CalendarRange },
       { to: '/barbero/citas', label: 'Citas', icon: ClipboardList },
+      { to: '/barbero/mensajes', label: 'Mensajes', icon: MessageSquare },
       { to: '/barbero/bloqueos', label: 'Bloquear horarios', icon: CalendarDays },
     ],
   },

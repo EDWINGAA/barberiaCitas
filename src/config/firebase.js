@@ -95,6 +95,9 @@ export const COLLECTIONS = {
   APPOINTMENTS: 'appointments',
   // Espejo publico de las horas ocupadas, sin datos personales
   BUSY: 'busy',
+  // Cerradura: un documento por cliente con la cita que tiene en pie.
+  // Es lo que permite a las reglas imponer "una cita activa a la vez".
+  ACTIVE_BOOKING: 'activeBooking',
   // Chat privado entre el cliente y el barbero de cada cita
   MESSAGES: 'messages',
   BLOCKS: 'blocks',

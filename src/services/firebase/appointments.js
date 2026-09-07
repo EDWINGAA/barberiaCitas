@@ -22,16 +22,19 @@ import {
 import {
   APPOINTMENT_STATUS,
   BLOCKING_APPOINTMENT_STATUS,
+  CHAT_CLOSING_STATUS,
   MIN_HOURS_BEFORE_CANCEL,
   ROLES,
 } from '@/constants'
-import { COLLECTIONS, firestore } from '@/config/firebase'
+import { COLLECTIONS, firebaseAuth, firestore } from '@/config/firebase'
 import { createAppointmentModel, createBlockModel, nowISO } from '@/models'
 import { addMinutes, hoursUntil, timeToMinutes, todayISO } from '@/utils/date'
 import { buildBusyIntervals, computeSlots, findConflict, getOpeningForDate } from '@/utils/schedule'
 import { docToObject, fail, run, snapshotToArray, stripUndefined } from './helpers'
 import firebaseCatalog from './catalog'
 import firebaseBarberServices from './barberServices'
+import firebaseMessages from './messages'
+import { checkCanBook } from '@/services/bookingPolicy'
 
 /* ------------------------------------------------------------------ */
 /*  Lecturas auxiliares                                                */
@@ -101,6 +104,84 @@ async function sincronizarOcupacion(citaId, cita) {
     await deleteDoc(ocupacionRef(citaId))
   } catch {
     // Puede no existir todavia: no es un fallo
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Cerradura de reserva activa                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Por que existe la coleccion "activeBooking".
+ *
+ * La politica dice que un cliente solo puede tener una cita en pie. Eso
+ * se comprueba en el codigo, pero el codigo solo protege a quien usa la
+ * aplicacion: cualquiera con la consola del navegador abierta puede
+ * hablar con la base de datos directamente y crear cien citas.
+ *
+ * Contar citas es justo lo que las reglas de Firestore NO saben hacer.
+ * Lo que si saben es mirar si existe un documento con un id concreto.
+ *
+ * De ahi la cerradura: un documento por cliente, cuyo id ES su uid, que
+ * apunta a la cita que tiene en pie. Las reglas exigen que exista y que
+ * apunte a la cita que se esta creando, asi que un cliente no puede
+ * tener dos: la segunda cerradura no se deja crear porque la primera
+ * sigue ahi.
+ *
+ * Se libera sola cuando la cita termina.
+ */
+
+function cerraduraRef(clientId) {
+  return doc(firestore(), COLLECTIONS.ACTIVE_BOOKING, clientId)
+}
+
+/** Pone la cerradura del cliente apuntando a una cita */
+async function ponerCerradura(clientId, citaId) {
+  await setDoc(cerraduraRef(clientId), { appointmentId: citaId })
+}
+
+/** La suelta, para que el cliente pueda volver a reservar */
+async function soltarCerradura(clientId) {
+  if (!clientId) return
+  try {
+    await deleteDoc(cerraduraRef(clientId))
+  } catch {
+    // Puede no existir: no es un fallo
+  }
+}
+
+/**
+ * Cierra todo lo que cuelga de una cita cuando esta llega a su fin.
+ *
+ * Son dos cosas, y las dos pasan al completarla, cancelarla o marcar que
+ * no asistio:
+ *
+ *   - Se suelta la cerradura, para que el cliente pueda reservar otra.
+ *   - Se borra la conversacion: el chat existe para esa sesion concreta
+ *     y si no la coleccion engordaria con miles de mensajes viejos que
+ *     encarecerian cada consulta.
+ *
+ * Nunca hace fallar la operacion principal. Si el borrado no sale, la
+ * cita ya cambio de estado y eso es lo que importa; el hilo quedaria
+ * huerfano pero invisible, porque el chat solo se muestra mientras la
+ * cita esta confirmada.
+ */
+async function cerrarCita(citaId, cita) {
+  if (!cita || !CHAT_CLOSING_STATUS.includes(cita.status)) return
+  // La cita termino: el cliente vuelve a poder reservar
+  await soltarCerradura(cita.clientId)
+
+  // El rol se deduce comparando con la propia cita, sin depender de
+  // quien llame: barbero, cliente o administrador.
+  const uid = firebaseAuth().currentUser?.uid || null
+  let role = ROLES.ADMIN
+  if (uid && uid === cita.barberId) role = ROLES.BARBERO
+  else if (uid && uid === cita.clientId) role = ROLES.CLIENTE
+
+  try {
+    await firebaseMessages.purgeThread({ appointmentId: citaId, userId: uid, role })
+  } catch (error) {
+    console.warn('[messages] no se pudo borrar la conversacion de la cita', citaId, error?.code)
   }
 }
 
@@ -316,6 +397,17 @@ async function create({ clientId, barberId, serviceId, date, startTime, notes = 
 
     if (date < todayISO()) fail('appointments/past-date', 'No puedes agendar en una fecha pasada.')
 
+    /*
+     * Limites contra el abuso. Se saltan si la cita la crea el barbero o
+     * el administrador a mano (llega "status"), porque entonces hay
+     * alguien de la casa decidiendo.
+     */
+    if (!status) {
+      const suyas = await list({ clientId })
+      const veto = checkCanBook({ appointments: suyas, today: todayISO() })
+      if (veto) fail(veto.code, veto.message)
+    }
+
     const endTime = addMinutes(startTime, offering.duration)
     await assertSlotFree({ barberId, date, startTime, endTime })
 
@@ -333,12 +425,30 @@ async function create({ clientId, barberId, serviceId, date, startTime, notes = 
     })
 
     const { id: _id, ...payload } = model
-    const created = await addDoc(collection(firestore(), COLLECTIONS.APPOINTMENTS), payload)
+
+    /*
+     * El id se reserva ANTES de escribir nada. Asi la cerradura puede
+     * apuntar a la cita todavia inexistente, y las reglas comprueban al
+     * crearla que la cerradura ya la estaba esperando: sin ese orden,
+     * entre las dos escrituras habria un hueco por el que colar una
+     * segunda cita.
+     */
+    const ref = doc(collection(firestore(), COLLECTIONS.APPOINTMENTS))
+    await ponerCerradura(clientId, ref.id)
+
+    try {
+      await setDoc(ref, payload)
+    } catch (error) {
+      // Si la cita no llega a crearse, la cerradura no puede quedarse
+      // puesta o el cliente no podria volver a intentarlo.
+      await soltarCerradura(clientId)
+      throw error
+    }
 
     // La cita ya existe: ahora se refleja en el espejo de ocupacion
-    await sincronizarOcupacion(created.id, model)
+    await sincronizarOcupacion(ref.id, model)
 
-    return { ...model, id: created.id }
+    return { ...model, id: ref.id }
   }, 'appointments/create-failed')
 }
 
@@ -356,6 +466,7 @@ async function setStatus(id, status) {
     // activo lo vuelve a ocupar.
     const actualizada = await get(id)
     await sincronizarOcupacion(id, actualizada)
+    await cerrarCita(id, actualizada)
 
     return actualizada
   }, 'appointments/status-failed')
@@ -443,6 +554,7 @@ async function updateAppointment(id, data) {
     const actualizada = await get(id)
     // "changes" puede traer un estado nuevo, asi que se revisa siempre
     await sincronizarOcupacion(id, actualizada)
+    await cerrarCita(id, actualizada)
 
     return actualizada
   }, 'appointments/update-failed')
@@ -450,9 +562,11 @@ async function updateAppointment(id, data) {
 
 async function removeAppointment(id) {
   return run(async () => {
-    // Primero la ocupacion: las reglas comprueban de quien es la cita, y
-    // para eso la cita todavia tiene que existir.
+    // Primero la ocupacion y la conversacion: las reglas comprueban de
+    // quien es la cita, y para eso la cita todavia tiene que existir.
+    const cita = await get(id)
     await sincronizarOcupacion(id, null)
+    await cerrarCita(id, cita ? { ...cita, status: APPOINTMENT_STATUS.CANCELADA } : null)
     await deleteDoc(doc(firestore(), COLLECTIONS.APPOINTMENTS, id))
     return true
   }, 'appointments/remove-failed')

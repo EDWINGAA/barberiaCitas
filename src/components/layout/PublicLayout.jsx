@@ -10,6 +10,7 @@ import { useBusiness } from '@/context/BusinessContext'
 import { Button } from '@/components/ui'
 import { Logo } from './Logo'
 import { UserMenu } from './UserMenu'
+import { NotificationBell } from './NotificationBell'
 import { PUBLIC_NAV } from './navConfig'
 
 /**
@@ -59,6 +60,7 @@ export function PublicLayout({ children }) {
                 <Button to={ROLE_HOME[user.role]} variant="outline" size="sm" className="hidden sm:inline-flex">
                   Mi panel
                 </Button>
+                <NotificationBell />
                 <UserMenu />
               </>
             ) : (

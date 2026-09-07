@@ -284,6 +284,68 @@ service cloud.firestore {
     }
 
     /* ============================================================= */
+    /*  messages: chat privado de una cita                           */
+    /* ============================================================= */
+    //  Cada mensaje lleva copiados "appointmentId", "clientId" y
+    //  "barberId" de la cita a la que pertenece. Con eso las reglas son
+    //  un simple filtro por campo (sin leer la cita en cada evaluacion),
+    //  lo que permite listar un hilo o los "sin leer" con una consulta
+    //  normal.
+    //
+    //  - Solo el cliente y el barbero de la cita leen o escriben.
+    //  - Enviar exige que la cita este "confirmada" (se comprueba
+    //    leyendo la cita: es una operacion de un solo documento).
+    //  - "readByClient" / "readByBarber" son las marcas de leido: cada
+    //    lado solo puede mover la suya y nada mas.
+
+    function citaDe(appointmentId) {
+      return get(/databases/$(database)/documents/appointments/$(appointmentId)).data;
+    }
+
+    function esParteDelMensaje(datos) {
+      return isSignedIn()
+        && (datos.clientId == request.auth.uid || datos.barberId == request.auth.uid);
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAdmin() || esParteDelMensaje(resource.data);
+
+      // Enviar: el autor firma el mensaje, es una de las dos partes, los
+      // participantes copiados coinciden con los de la cita, la cita
+      // esta confirmada y marca como leido su propio lado.
+      allow create: if isSignedIn()
+        && incoming().senderId == request.auth.uid
+        && esParteDelMensaje(incoming())
+        && incoming().clientId == citaDe(incoming().appointmentId).clientId
+        && incoming().barberId == citaDe(incoming().appointmentId).barberId
+        && citaDe(incoming().appointmentId).status == 'confirmada'
+        && incoming().text is string
+        && incoming().text.size() > 0
+        && incoming().text.size() <= 1000
+        && (
+          (incoming().senderRole == 'cliente'
+            && incoming().clientId == request.auth.uid
+            && incoming().readByClient == true)
+          || (incoming().senderRole == 'barbero'
+            && incoming().barberId == request.auth.uid
+            && incoming().readByBarber == true)
+        );
+
+      // Actualizar solo sirve para marcar como leido: no se toca el
+      // contenido y cada lado solo puede mover SU marca.
+      allow update: if esParteDelMensaje(stored())
+        && keepsFields(['appointmentId', 'clientId', 'barberId', 'senderId', 'senderRole', 'text', 'createdAt'])
+        && (
+          (stored().clientId == request.auth.uid
+            && incoming().readByBarber == stored().readByBarber)
+          || (stored().barberId == request.auth.uid
+            && incoming().readByClient == stored().readByClient)
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    /* ============================================================= */
     /*  courses                                                      */
     /* ============================================================= */
     //  - Lectura publica: el catalogo debe verse sin cuenta.

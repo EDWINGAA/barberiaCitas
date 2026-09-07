@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
-import { CalendarPlus, CalendarX2, History, RefreshCw } from 'lucide-react'
+import { CalendarPlus, CalendarX2, History, MessageSquare, RefreshCw } from 'lucide-react'
 
-import { APPOINTMENT_STATUS, MIN_HOURS_BEFORE_CANCEL } from '@/constants'
+import { APPOINTMENT_STATUS, CHAT_VISIBLE_STATUS, MIN_HOURS_BEFORE_CANCEL } from '@/constants'
 import { formatLongDate, formatTime12, hoursUntil, todayISO } from '@/utils/date'
 import { formatDuration } from '@/utils/date'
 import services from '@/services'
@@ -20,6 +20,7 @@ import {
   Tabs,
 } from '@/components/ui'
 import { AppointmentCard } from '@/components/appointments/AppointmentCard'
+import { AppointmentChat } from '@/components/chat/AppointmentChat'
 
 /**
  * "Mis citas": proximas e historial, con opcion de cancelar y reagendar.
@@ -31,18 +32,33 @@ export default function MyAppointments() {
   const [tab, setTab] = useState('proximas')
   const [cancelTarget, setCancelTarget] = useState(null)
   const [rescheduleTarget, setRescheduleTarget] = useState(null)
+  const [chatTarget, setChatTarget] = useState(null)
   const [working, setWorking] = useState(false)
 
   const loader = useCallback(async () => {
-    const [appointments, serviceList, barbers] = await Promise.all([
+    const [appointments, serviceList, barbers, unread] = await Promise.all([
       services.appointments.list({ clientId: user.uid }),
       services.services.list(),
       services.users.listBarbers({ activeOnly: false }),
+      // El chat es accesorio: si falla no debe tumbar la lista de citas
+      services.messages.unreadCounts({ userId: user.uid, role: user.role }).catch(() => ({})),
     ])
-    return { appointments, serviceList, barbers }
-  }, [user.uid])
+    return { appointments, serviceList, barbers, unread }
+  }, [user.uid, user.role])
 
-  const { data, loading, error, reload } = useAsync(loader, [user.uid])
+  const { data, loading, error, reload, setData } = useAsync(loader, [user.uid])
+
+  const unreadByAppt = data?.unread || {}
+
+  /** Refresca solo los contadores de mensajes sin leer */
+  const refreshUnread = useCallback(async () => {
+    try {
+      const unread = await services.messages.unreadCounts({ userId: user.uid, role: user.role })
+      setData((prev) => (prev ? { ...prev, unread } : prev))
+    } catch {
+      /* los contadores son accesorios */
+    }
+  }, [user.uid, user.role, setData])
 
   const serviceById = useMemo(
     () => Object.fromEntries((data?.serviceList || []).map((s) => [s.id, s])),
@@ -134,6 +150,10 @@ export default function MyAppointments() {
                 appointment.status
               ) && hoursUntil(appointment.date, appointment.startTime) >= MIN_HOURS_BEFORE_CANCEL
 
+            const puedeChatear = CHAT_VISIBLE_STATUS.includes(appointment.status)
+            const sinLeer = unreadByAppt[appointment.id] || 0
+            const tieneAcciones = puedeChatear || canModify || tab === 'proximas'
+
             return (
               <AppointmentCard
                 key={appointment.id}
@@ -142,30 +162,52 @@ export default function MyAppointments() {
                 barber={barberById[appointment.barberId]}
                 perspective="cliente"
                 actions={
-                  canModify ? (
-                    <>
+                  !tieneAcciones ? null : (
+                  <>
+                    {puedeChatear && (
                       <Button
                         size="sm"
                         variant="secondary"
-                        icon={RefreshCw}
-                        onClick={() => setRescheduleTarget(appointment)}
+                        icon={MessageSquare}
+                        onClick={() => setChatTarget(appointment)}
                       >
-                        Reagendar
+                        Mensajes
+                        {sinLeer > 0 && (
+                          <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold-500 px-1 text-[10px] font-bold text-ink-950">
+                            {sinLeer}
+                          </span>
+                        )}
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="dangerGhost"
-                        icon={CalendarX2}
-                        onClick={() => setCancelTarget(appointment)}
-                      >
-                        Cancelar
-                      </Button>
-                    </>
-                  ) : tab === 'proximas' ? (
-                    <p className="text-xs text-ink-500">
-                      Faltan menos de {MIN_HOURS_BEFORE_CANCEL} h: llamanos para cualquier cambio.
-                    </p>
-                  ) : null
+                    )}
+
+                    {canModify && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={RefreshCw}
+                          onClick={() => setRescheduleTarget(appointment)}
+                        >
+                          Reagendar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="dangerGhost"
+                          icon={CalendarX2}
+                          onClick={() => setCancelTarget(appointment)}
+                        >
+                          Cancelar
+                        </Button>
+                      </>
+                    )}
+
+                    {!canModify && !puedeChatear && tab === 'proximas' && (
+                      <p className="text-xs text-ink-500">
+                        Faltan menos de {MIN_HOURS_BEFORE_CANCEL} h: llamanos para cualquier cambio.
+                      </p>
+                    )}
+                  </>
+                  )
                 }
               />
             )
@@ -188,6 +230,15 @@ export default function MyAppointments() {
             : ''
         }
         confirmLabel="Si, cancelar"
+      />
+
+      {/* ---------- Chat con el barbero ---------- */}
+      <AppointmentChat
+        appointment={chatTarget}
+        me={user}
+        counterpart={chatTarget ? barberById[chatTarget.barberId] : null}
+        onClose={() => setChatTarget(null)}
+        onActivity={refreshUnread}
       />
 
       {/* ---------- Reagendar ---------- */}

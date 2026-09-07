@@ -12,7 +12,12 @@ import {
   X,
 } from 'lucide-react'
 
-import { APPOINTMENT_STATUS, APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUS_STYLES } from '@/constants'
+import {
+  APPOINTMENT_STATUS,
+  APPOINTMENT_STATUS_LABELS,
+  APPOINTMENT_STATUS_STYLES,
+  CHAT_VISIBLE_STATUS,
+} from '@/constants'
 import { cn, formatMoney, formatMoneyShort, normalizeText } from '@/utils/format'
 import {
   addDays,
@@ -39,6 +44,7 @@ import {
   SkeletonList,
 } from '@/components/ui'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { AppointmentChat } from '@/components/chat/AppointmentChat'
 
 /** Rangos rapidos de fecha */
 const RANGE_OPTIONS = [
@@ -73,17 +79,32 @@ export default function BarberAppointments() {
   const [status, setStatus] = useState('')
   const [search, setSearch] = useState('')
   const [updating, setUpdating] = useState(null)
+  const [chatTarget, setChatTarget] = useState(null)
 
   const loader = useCallback(async () => {
-    const [appointments, serviceList, clients] = await Promise.all([
+    const [appointments, serviceList, clients, unread] = await Promise.all([
       services.appointments.list({ barberId: user.uid }),
       services.services.list(),
       services.users.listClients(),
+      // El chat es accesorio: si falla no debe tumbar la lista de citas
+      services.messages.unreadCounts({ userId: user.uid, role: user.role }).catch(() => ({})),
     ])
-    return { appointments, serviceList, clients }
-  }, [user.uid])
+    return { appointments, serviceList, clients, unread }
+  }, [user.uid, user.role])
 
-  const { data, loading, error, reload } = useAsync(loader, [user.uid])
+  const { data, loading, error, reload, setData } = useAsync(loader, [user.uid])
+
+  const unreadByAppt = data?.unread || {}
+
+  /** Refresca solo los contadores de mensajes sin leer */
+  const refreshUnread = useCallback(async () => {
+    try {
+      const unread = await services.messages.unreadCounts({ userId: user.uid, role: user.role })
+      setData((prev) => (prev ? { ...prev, unread } : prev))
+    } catch {
+      /* los contadores son accesorios */
+    }
+  }, [user.uid, user.role, setData])
 
   const serviceById = useMemo(
     () => Object.fromEntries((data?.serviceList || []).map((s) => [s.id, s])),
@@ -297,6 +318,8 @@ export default function BarberAppointments() {
                     cliente={clientById[cita.clientId]}
                     primera={i === 0}
                     ocupada={updating === cita.id}
+                    mensajesSinLeer={unreadByAppt[cita.id] || 0}
+                    onAbrirChat={() => setChatTarget(cita)}
                     onCambiarEstado={(next) => changeStatus(cita.id, next)}
                   />
                 ))}
@@ -305,6 +328,14 @@ export default function BarberAppointments() {
           ))}
         </div>
       )}
+
+      <AppointmentChat
+        appointment={chatTarget}
+        me={user}
+        counterpart={chatTarget ? clientById[chatTarget.clientId] : null}
+        onClose={() => setChatTarget(null)}
+        onActivity={refreshUnread}
+      />
     </>
   )
 }
@@ -373,9 +404,19 @@ function CabeceraDia({ jornada }) {
  * col-start/row-start para poder cambiar el orden entre movil y
  * escritorio sin duplicar el contenido.
  */
-function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }) {
+function FilaCita({
+  cita,
+  servicio,
+  cliente,
+  primera,
+  ocupada,
+  mensajesSinLeer = 0,
+  onAbrirChat,
+  onCambiarEstado,
+}) {
   const estilo = APPOINTMENT_STATUS_STYLES[cita.status]
   const cerrada = [APPOINTMENT_STATUS.CANCELADA, APPOINTMENT_STATUS.COMPLETADA].includes(cita.status)
+  const tieneChat = CHAT_VISIBLE_STATUS.includes(cita.status)
 
   return (
     <article
@@ -432,7 +473,17 @@ function FilaCita({ cita, servicio, cliente, primera, ocupada, onCambiarEstado }
       </div>
 
       {/* --- Acciones --- */}
-      <div className="col-span-2 lg:col-span-1 lg:col-start-5 lg:row-start-1">
+      <div className="col-span-2 flex flex-col gap-2 lg:col-span-1 lg:col-start-5 lg:row-start-1 lg:items-end">
+        {tieneChat && (
+          <Button size="xs" variant="secondary" icon={MessageSquare} onClick={onAbrirChat}>
+            Mensajes
+            {mensajesSinLeer > 0 && (
+              <span className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-gold-500 px-1 text-[10px] font-bold text-ink-950">
+                {mensajesSinLeer}
+              </span>
+            )}
+          </Button>
+        )}
         <AccionesEstado cita={cita} ocupada={ocupada} onCambiar={onCambiarEstado} />
       </div>
 

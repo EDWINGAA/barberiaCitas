@@ -116,6 +116,18 @@ export function resolveOffering({ services = [], rows = [], barberId, serviceId 
 //  una sola vez, al confirmar, y solo el de la combinacion elegida.
 
 /**
+ * Datos publicos de un barbero para las tarjetas del cliente.
+ * Solo identidad y foto: nunca precios ni tarifas.
+ */
+function publicBarber(barber) {
+  return {
+    uid: barber.uid,
+    name: barber.name,
+    photoURL: barber.photoURL || '',
+  }
+}
+
+/**
  * Que barberos ofrecen un servicio. SIN precio, a proposito.
  * Es lo que alimenta el paso "elige barbero" del asistente de reserva.
  *
@@ -153,12 +165,15 @@ export function resolveBookableServices({ services = [], rows = [], barbers = []
         origin: OFFERING_ORIGIN.CATALOGO,
         approxDuration: Number(service.duration) || 30,
         barberCount: quienes.length,
+        // Fotos de quienes lo hacen, para verlas sin abrir el servicio
+        barbers: quienes.map(({ barber }) => publicBarber(barber)),
       }
     })
     .filter(Boolean)
 
   // Servicios propios: cada uno solo lo hace su barbero
   const activos = new Set(barbers.map((b) => b.uid))
+  const porUid = Object.fromEntries(barbers.map((b) => [b.uid, b]))
   const propios = rows
     .filter((r) => !r.serviceId && r.active !== false && activos.has(r.barberId))
     .map((r) => ({
@@ -169,6 +184,7 @@ export function resolveBookableServices({ services = [], rows = [], barbers = []
       approxDuration: Number(r.duration) || 30,
       barberCount: 1,
       barberId: r.barberId,
+      barbers: porUid[r.barberId] ? [publicBarber(porUid[r.barberId])] : [],
     }))
 
   return [...delCatalogo, ...propios].sort((a, b) =>

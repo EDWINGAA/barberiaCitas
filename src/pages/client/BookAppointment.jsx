@@ -326,7 +326,16 @@ export default function BookAppointment() {
                         Alrededor de {formatDuration(item.approxDuration)} ·{' '}
                         {item.barberCount === 1 ? '1 barbero' : `${item.barberCount} barberos`}
                       </span>
+
+                      {/* En movil las fotos van bajo el texto, sin apretar la fila */}
+                      <BarberStack barbers={item.barbers} className="mt-2 sm:hidden" />
                     </span>
+
+                    {/* En pantallas anchas, alineadas a la derecha */}
+                    <BarberStack
+                      barbers={item.barbers}
+                      className="hidden shrink-0 self-center pr-1 sm:flex"
+                    />
 
                     <ChevronRight className="h-5 w-5 shrink-0 text-ink-600" />
                   </button>
@@ -654,6 +663,36 @@ export default function BookAppointment() {
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * Pila de avatares de los barberos que ofrecen un servicio.
+ * Solo caras y nombres (en el title), nunca precios: da una idea rapida
+ * de con quien te puedes cortar sin tener que abrir el servicio.
+ */
+function BarberStack({ barbers = [], className = '' }) {
+  if (!barbers.length) return null
+  const shown = barbers.slice(0, 4)
+  const rest = barbers.length - shown.length
+
+  return (
+    <span className={cn('flex items-center', className)}>
+      {shown.map((b, i) => (
+        <Avatar
+          key={b.uid}
+          src={b.photoURL}
+          name={b.name}
+          size="xs"
+          className={cn('ring-2 ring-ink-850', i > 0 && '-ml-2.5')}
+        />
+      ))}
+      {rest > 0 && (
+        <span className="-ml-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-ink-700 text-[10px] font-semibold text-ink-300 ring-2 ring-ink-850">
+          +{rest}
+        </span>
+      )}
+    </span>
+  )
+}
 
 function SummaryRow({ icon: Icon, label, value }) {
   return (

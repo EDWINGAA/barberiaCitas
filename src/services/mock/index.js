@@ -9,6 +9,7 @@ import { mockUsers } from './users'
 import { mockCatalog } from './catalog'
 import { mockBarberServices } from './barberServices'
 import { mockAppointments } from './appointments'
+import { mockMessages } from './messages'
 import { mockCourses } from './courses'
 import { mockStats } from './stats'
 import { resetDB } from './store'
@@ -23,6 +24,7 @@ export const mockServices = {
   storage: mockCatalog.storage,
   appointments: mockAppointments.appointments,
   blocks: mockAppointments.blocks,
+  messages: mockMessages,
   courses: mockCourses.courses,
   enrollments: mockCourses.enrollments,
   stats: mockStats,

@@ -290,6 +290,27 @@ export const OPENING_HOURS_KEYS = ['dom', 'lun', 'mar', 'mie', 'jue', 'vie', 'sa
 export const MIN_HOURS_BEFORE_CANCEL = 2
 
 /* ------------------------------------------------------------------ */
+/*  Mensajeria cliente <-> barbero                                     */
+/* ------------------------------------------------------------------ */
+
+/** Longitud maxima de un mensaje del chat de una cita */
+export const MESSAGE_MAX_LENGTH = 1000
+
+/**
+ * El chat de una cita se abre cuando el barbero la confirma. Una vez
+ * completada el hilo sigue visible pero de solo lectura; en el resto de
+ * estados (pendiente, cancelada, no-show) no hay chat.
+ */
+export const CHAT_WRITABLE_STATUS = [APPOINTMENT_STATUS.CONFIRMADA]
+export const CHAT_VISIBLE_STATUS = [
+  APPOINTMENT_STATUS.CONFIRMADA,
+  APPOINTMENT_STATUS.COMPLETADA,
+]
+
+/** Cada cuantos milisegundos el chat abierto vuelve a pedir mensajes */
+export const CHAT_POLL_MS = 4000
+
+/* ------------------------------------------------------------------ */
 /*  Varios                                                             */
 /* ------------------------------------------------------------------ */
 export const CURRENCY = 'MXN'

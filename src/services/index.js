@@ -27,6 +27,9 @@
  *                          reschedule, remove, getAvailableSlots,
  *                          getDaySlots, getAgendaDay
  *   services.blocks        list, create, remove
+ *   services.messages      chat cliente<->barbero de una cita:
+ *                          listThread, send, markRead, unreadCounts,
+ *                          listConversations
  *   services.courses       list, get, create, update, setStatus, remove
  *   services.enrollments   list, get, enroll, cancel, setAttendance,
  *                          setPaymentStatus

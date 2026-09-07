@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bell, CalendarClock, GraduationCap, UserCheck } from 'lucide-react'
+import { Bell, CalendarClock, GraduationCap, MessageSquare, UserCheck } from 'lucide-react'
 
 import { APPOINTMENT_STATUS, COURSE_STATUS, ROLES } from '@/constants'
+import { cn } from '@/utils/format'
 import { formatRelativeDay, formatTime12, todayISO, addDays } from '@/utils/date'
 import { useAuth } from '@/context/AuthContext'
 import services from '@/services'
@@ -122,6 +123,25 @@ export function NotificationBell() {
             })
           })
         }
+
+        // Mensajes sin leer del chat de citas (barbero y cliente)
+        if (user.role === ROLES.BARBERO || user.role === ROLES.CLIENTE) {
+          const unread = await services.messages.unreadCounts({
+            userId: user.uid,
+            role: user.role,
+          })
+          const total = Object.values(unread).reduce((sum, n) => sum + n, 0)
+          if (total) {
+            collected.unshift({
+              id: 'unread-messages',
+              icon: MessageSquare,
+              tone: 'text-gold-400',
+              title: `${total} mensaje${total > 1 ? 's' : ''} sin leer`,
+              detail: 'Abre la conversacion desde tus citas',
+              to: user.role === ROLES.BARBERO ? '/barbero/citas' : '/cliente/citas',
+            })
+          }
+        }
       } catch {
         // Las notificaciones son accesorias: si fallan, no molestamos
       }
@@ -156,39 +176,56 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 origin-top-right animate-slide-up overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-panel">
-          <div className="border-b border-ink-700/70 px-4 py-3">
-            <p className="text-sm font-semibold text-ink-100">Notificaciones</p>
-          </div>
+        <>
+          {/* En movil, capa para atenuar el fondo y cerrar al tocar fuera */}
+          <div
+            className="fixed inset-0 z-40 bg-black/40 sm:hidden"
+            aria-hidden="true"
+            onClick={() => setOpen(false)}
+          />
 
-          {items.length === 0 ? (
-            <div className="px-4 py-8 text-center">
-              <Bell className="mx-auto h-8 w-8 text-ink-600" />
-              <p className="mt-2 text-sm text-ink-400">Todo en orden, nada pendiente.</p>
+          <div
+            className={cn(
+              'z-50 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-panel animate-slide-up',
+              // Movil: anclado al viewport, ancho casi completo, nunca se sale
+              'fixed inset-x-3 top-[4.25rem]',
+              // sm+: menu desplegable bajo la campana
+              'sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 sm:origin-top-right'
+            )}
+          >
+            <div className="border-b border-ink-700/70 px-4 py-3">
+              <p className="text-sm font-semibold text-ink-100">Notificaciones</p>
             </div>
-          ) : (
-            <ul className="max-h-80 divide-y divide-ink-800 overflow-y-auto">
-              {items.map((item) => {
-                const Icon = item.icon
-                return (
-                  <li key={item.id}>
-                    <Link
-                      to={item.to}
-                      onClick={() => setOpen(false)}
-                      className="flex gap-3 px-4 py-3 transition hover:bg-ink-850"
-                    >
-                      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${item.tone}`} />
-                      <span className="min-w-0">
-                        <span className="block text-sm text-ink-100">{item.title}</span>
-                        <span className="block truncate text-xs text-ink-400">{item.detail}</span>
-                      </span>
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
+
+            {items.length === 0 ? (
+              <div className="px-4 py-8 text-center">
+                <Bell className="mx-auto h-8 w-8 text-ink-600" />
+                <p className="mt-2 text-sm text-ink-400">Todo en orden, nada pendiente.</p>
+              </div>
+            ) : (
+              <ul className="max-h-[65vh] divide-y divide-ink-800 overflow-y-auto sm:max-h-80">
+                {items.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <li key={item.id}>
+                      <Link
+                        to={item.to}
+                        onClick={() => setOpen(false)}
+                        className="flex gap-3 px-4 py-3 transition hover:bg-ink-850"
+                      >
+                        <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${item.tone}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm text-ink-100">{item.title}</span>
+                          <span className="block truncate text-xs text-ink-400">{item.detail}</span>
+                        </span>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

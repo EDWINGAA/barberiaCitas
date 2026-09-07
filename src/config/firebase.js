@@ -95,6 +95,8 @@ export const COLLECTIONS = {
   APPOINTMENTS: 'appointments',
   // Espejo publico de las horas ocupadas, sin datos personales
   BUSY: 'busy',
+  // Chat privado entre el cliente y el barbero de cada cita
+  MESSAGES: 'messages',
   BLOCKS: 'blocks',
   COURSES: 'courses',
   ENROLLMENTS: 'enrollments',

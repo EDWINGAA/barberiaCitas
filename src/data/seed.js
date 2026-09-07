@@ -23,6 +23,7 @@ import {
   createUserModel,
   createServiceModel,
   createAppointmentModel,
+  createMessageModel,
   createBlockModel,
   createCourseModel,
   createEnrollmentModel,
@@ -58,7 +59,7 @@ import { resolveOffering } from '@/services/offeringsCore'
  * con datos viejos e incompletos (por ejemplo, sin la galeria de portada
  * o sin los precios por barbero) y el panel no cuadra con la web.
  */
-export const SEED_VERSION = 5
+export const SEED_VERSION = 7
 
 export const DEMO_PASSWORD = 'demo123'
 
@@ -859,6 +860,51 @@ function buildAppointments({ services, barberServices, courses, blocks, business
 }
 
 /* ================================================================== */
+/*  8. Chat de citas                                                   */
+/* ================================================================== */
+
+/**
+ * Siembra una conversacion de ejemplo en la primera cita confirmada que
+ * aun no ha pasado, para que el chat no se vea vacio al abrir la demo.
+ */
+function buildMessages(appointments) {
+  const target = appointments.find(
+    (a) => a.status === APPOINTMENT_STATUS.CONFIRMADA && a.date >= offsetDate(0)
+  )
+  if (!target) return []
+
+  const base = Date.now() - 3 * 60 * 60 * 1000
+  const stamp = (min) => new Date(base + min * 60 * 1000).toISOString()
+
+  const partes = { clientId: target.clientId, barberId: target.barberId }
+
+  return [
+    createMessageModel({
+      id: 'msg_001',
+      appointmentId: target.id,
+      ...partes,
+      senderId: target.clientId,
+      senderRole: ROLES.CLIENTE,
+      text: 'Hola! Voy a llegar unos 5 minutos tarde, disculpa.',
+      readByClient: true,
+      readByBarber: true,
+      createdAt: stamp(0),
+    }),
+    createMessageModel({
+      id: 'msg_002',
+      appointmentId: target.id,
+      ...partes,
+      senderId: target.barberId,
+      senderRole: ROLES.BARBERO,
+      text: 'Sin problema, te espero. Nos vemos.',
+      readByClient: false,
+      readByBarber: true,
+      createdAt: stamp(12),
+    }),
+  ]
+}
+
+/* ================================================================== */
 /*  Ensamblado final                                                   */
 /* ================================================================== */
 
@@ -877,6 +923,7 @@ export function buildSeedData() {
   const enrollments = buildEnrollments(courses) // ajusta enrolledCount de cada curso
   const blocks = buildBlocks()
   const appointments = buildAppointments({ services, barberServices, courses, blocks, business })
+  const messages = buildMessages(appointments)
 
   return {
     // Sello de version: el almacen lo usa para detectar datos caducados
@@ -888,6 +935,7 @@ export function buildSeedData() {
     services,
     barberServices,
     appointments,
+    messages,
     blocks,
     courses,
     enrollments,

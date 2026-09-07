@@ -17,6 +17,7 @@ import {
   COURSE_MODALITIES,
   ENROLLMENT_STATUS,
   GALLERY_LOCATIONS,
+  MESSAGE_MAX_LENGTH,
   PAYMENT_STATUS,
 } from '@/constants'
 
@@ -117,6 +118,41 @@ export function createAppointmentModel(data = {}) {
     price: Number(data.price) || 0,
     createdAt: data.createdAt || nowISO(),
     updatedAt: data.updatedAt || nowISO(),
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  messages (chat de una cita)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Un mensaje del chat privado entre el cliente y el barbero de una cita.
+ *
+ * El hilo vive pegado a la cita (appointmentId). Se copian ademas
+ * "clientId" y "barberId" de la cita: asi las reglas de seguridad y las
+ * consultas de "sin leer" son un simple filtro por campo, sin tener que
+ * leer la cita en cada evaluacion.
+ *
+ * "readByClient" y "readByBarber" permiten pintar el contador de no
+ * leidos de cada lado sin guardar una marca de lectura por persona.
+ */
+export function createMessageModel(data = {}) {
+  const role = data.senderRole === ROLES.BARBERO ? ROLES.BARBERO : ROLES.CLIENTE
+  return {
+    id: data.id || makeId('msg'),
+    appointmentId: data.appointmentId || '',
+    // Participantes de la cita, copiados para reglas y consultas
+    clientId: data.clientId || '',
+    barberId: data.barberId || '',
+    senderId: data.senderId || '',
+    senderRole: role,
+    text: String(data.text || '').trim().slice(0, MESSAGE_MAX_LENGTH),
+    // Quien escribe ya lo ha "leido"; el otro lado lo tiene pendiente
+    readByClient:
+      data.readByClient !== undefined ? Boolean(data.readByClient) : role === ROLES.CLIENTE,
+    readByBarber:
+      data.readByBarber !== undefined ? Boolean(data.readByBarber) : role === ROLES.BARBERO,
+    createdAt: data.createdAt || nowISO(),
   }
 }
 

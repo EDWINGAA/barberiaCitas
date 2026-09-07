@@ -9,6 +9,7 @@ import { firebaseUsers } from './users'
 import { firebaseCatalog } from './catalog'
 import { firebaseBarberServices } from './barberServices'
 import { firebaseAppointments } from './appointments'
+import { firebaseMessages } from './messages'
 import { firebaseCourses } from './courses'
 import { firebaseStats } from './stats'
 
@@ -22,6 +23,7 @@ export const firebaseServices = {
   storage: firebaseCatalog.storage,
   appointments: firebaseAppointments.appointments,
   blocks: firebaseAppointments.blocks,
+  messages: firebaseMessages,
   courses: firebaseCourses.courses,
   enrollments: firebaseCourses.enrollments,
   stats: firebaseStats,

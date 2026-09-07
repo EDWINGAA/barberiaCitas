@@ -13,6 +13,7 @@ import {
   Images,
   LayoutDashboard,
   ListChecks,
+  MessageSquare,
   Scissors,
   Settings,
   ShieldCheck,
@@ -88,6 +89,7 @@ export const CLIENT_NAV = [
   { to: '/cliente', label: 'Inicio', icon: LayoutDashboard, end: true },
   { to: '/cliente/agendar', label: 'Agendar cita', icon: CalendarDays },
   { to: '/cliente/citas', label: 'Mis citas', icon: ListChecks },
+  { to: '/cliente/mensajes', label: 'Mensajes', icon: MessageSquare },
   { to: '/cliente/cursos', label: 'Mis cursos', icon: GraduationCap },
   { to: '/cliente/perfil', label: 'Mi perfil', icon: User },
 ]
